@@ -1,5 +1,4 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { fetch, Headers, type RequestInit } from "undici";
 
 const router: IRouter = Router();
 
