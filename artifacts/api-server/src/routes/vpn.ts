@@ -7,6 +7,7 @@ import {
 import type { RequestInit as FetchRequestInit } from "undici";
 
 const router: IRouter = Router();
+const nativeFetch = globalThis.fetch as typeof import("undici").fetch;
 
 type Method = "GET" | "POST";
 
@@ -41,7 +42,7 @@ function proxyToSupabase(functionName: string, method: Method) {
               : req.params["paymentId"] ?? "",
           )}`
         : "";
-      const upstream = await globalThis.fetch(
+      const upstream = await nativeFetch(
         `${baseUrl.replace(/\/+$/, "")}/functions/v1/${functionName}${query}`,
         options,
       );
