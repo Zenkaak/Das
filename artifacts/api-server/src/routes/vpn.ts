@@ -1,12 +1,18 @@
-import { Router, type IRouter, type Request, type Response } from "express";
-import { fetch, Headers, type RequestInit } from "undici";
+import {
+  Router,
+  type IRouter,
+  type Request,
+  type Response as ExpressResponse,
+} from "express";
+import type { RequestInit as FetchRequestInit } from "undici";
 
 const router: IRouter = Router();
+const nativeFetch = globalThis.fetch as typeof import("undici").fetch;
 
 type Method = "GET" | "POST";
 
 function proxyToSupabase(functionName: string, method: Method) {
-  return async (req: Request, res: Response) => {
+  return async (req: Request, res: ExpressResponse) => {
     const baseUrl = process.env["SUPABASE_URL"];
     if (!baseUrl) {
       res.status(503).json({ error: "VPN backend is not configured", code: "SUPABASE_NOT_CONFIGURED" });
@@ -17,7 +23,7 @@ function proxyToSupabase(functionName: string, method: Method) {
     const authorization = req.header("authorization");
     if (authorization) headers.set("authorization", authorization);
 
-    const options: RequestInit = { method, headers, signal: AbortSignal.timeout(45_000) };
+    const options: FetchRequestInit = { method, headers, signal: AbortSignal.timeout(45_000) };
     if (method === "POST") {
       headers.set("content-type", "application/json");
       if (req.header("idempotency-key")) {
@@ -36,7 +42,7 @@ function proxyToSupabase(functionName: string, method: Method) {
               : req.params["paymentId"] ?? "",
           )}`
         : "";
-      const upstream = await fetch(
+      const upstream = await nativeFetch(
         `${baseUrl.replace(/\/+$/, "")}/functions/v1/${functionName}${query}`,
         options,
       );
