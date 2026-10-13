@@ -73,14 +73,6 @@ Deno.serve(async (request) => {
       return json({ error: "Choose a plan and enter a valid Kenyan M-Pesa number", code: "INVALID_PAYMENT_REQUEST" }, 400);
     }
 
-    const transactionType = Deno.env.get("MPESA_TRANSACTION_TYPE");
-    if (transactionType !== "CustomerPayBillOnline" && transactionType !== "CustomerBuyGoodsOnline") {
-      return json({
-        error: "M-Pesa collection type is not configured",
-        code: "MPESA_COLLECTION_TYPE_REQUIRED",
-      }, 503);
-    }
-
     if (!(await allowRequest(`payment:${session.id}`, 3, 300))) {
       return json({ error: "Too many payment requests. Try again later.", code: "RATE_LIMITED" }, 429);
     }
@@ -149,7 +141,7 @@ Deno.serve(async (request) => {
         BusinessShortCode: shortcode,
         Password: password,
         Timestamp: timestamp,
-        TransactionType: transactionType,
+        TransactionType: "CustomerBuyGoodsOnline",
         Amount: plan.amount_kes,
         PartyA: phone,
         PartyB: shortcode,

@@ -33,10 +33,10 @@ import {
 import { useColors } from "@/hooks/useColors";
 
 const plans = [
-  { code: "three_days", name: "3 days", days: 3, price: 80 },
+  { code: "three_days", name: "3 Days", days: 3, price: 80 },
   { code: "weekly", name: "Weekly", days: 7, price: 120 },
   { code: "monthly", name: "Monthly", days: 30, price: 350, popular: true },
-  { code: "three_months", name: "3 months", days: 90, price: 999 },
+  { code: "three_months", name: "3 Months", days: 90, price: 999 },
   { code: "yearly", name: "Yearly", days: 365, price: 2300 },
 ] as const;
 
@@ -146,6 +146,11 @@ export default function HomeScreen() {
   const [paymentId, setPaymentId] = useState("");
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [paymentNotice, setPaymentNotice] = useState("");
+  const [paymentAttempt, setPaymentAttempt] = useState<{
+    key: string;
+    planCode: PlanCode;
+    phoneNumber: string;
+  } | null>(null);
 
   const aura = useSharedValue(0.62);
   useEffect(() => {
@@ -245,11 +250,22 @@ export default function HomeScreen() {
 
     setSubmittingPayment(true);
     try {
-      const idempotencyKey = await randomHex(16);
+      const phoneNumber = paymentPhone.trim();
+      const idempotencyKey =
+        paymentAttempt?.planCode === currentPlan.code &&
+          paymentAttempt.phoneNumber === phoneNumber
+          ? paymentAttempt.key
+          : await randomHex(16);
+      setPaymentAttempt({
+        key: idempotencyKey,
+        planCode: currentPlan.code,
+        phoneNumber,
+      });
       const payment = await createVpnPayment(
-        { planCode: currentPlan.code, phoneNumber: paymentPhone.trim() },
+        { planCode: currentPlan.code, phoneNumber },
         { headers: { "idempotency-key": idempotencyKey } },
       );
+      setPaymentAttempt(null);
       setPaymentId(payment.id);
       setPaymentNotice(payment.message ?? "Check your phone for the M-Pesa prompt.");
       setPaymentOpen(false);
@@ -263,10 +279,11 @@ export default function HomeScreen() {
           ? (error as { data?: { code?: unknown } }).data?.code
           : undefined;
       const reason = `${String(apiCode ?? "")} ${message}`;
-      if (reason.includes("MPESA_COLLECTION_TYPE_REQUIRED")) {
-        setPaymentError("M-Pesa collection type is not configured yet. No payment was requested.");
-      } else if (reason.includes("PAYMENT_REQUEST_PENDING")) {
+      if (reason.includes("PAYMENT_REQUEST_PENDING")) {
         setPaymentError("A previous request is still processing. Wait for its status before trying again.");
+      } else if (reason.includes("STK_PUSH_REJECTED")) {
+        setPaymentAttempt(null);
+        setPaymentError("Safaricom did not accept this request. No payment was taken. You can try again.");
       } else if (reason.includes("SERVER_NOT_CONFIGURED")) {
         setPaymentError("The secure payment backend isn’t configured yet. No payment was requested.");
       } else {
