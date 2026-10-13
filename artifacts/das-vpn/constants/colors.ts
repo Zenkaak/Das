@@ -19,7 +19,7 @@ const colors = {
     tint: '#4c83f4',
 
     // Core surfaces
-    background: '#080e1b',
+    background: '#080D1B',
     backgroundGlow: '#10172f',
     foreground: '#eef3ff',
 
@@ -28,7 +28,7 @@ const colors = {
     cardForeground: '#eef3ff',
 
     // Primary action color (buttons, links, active states)
-    primary: '#4c83f4',
+    primary: '#2f81ff',
     primaryForeground: '#ffffff',
 
     // Secondary / less-emphasis interactive surfaces
@@ -54,12 +54,12 @@ const colors = {
   dark: {
     text: '#eef3ff',
     tint: '#4c83f4',
-    background: '#080e1b',
+    background: '#080D1B',
     backgroundGlow: '#10172f',
     foreground: '#eef3ff',
     card: '#101a2c',
     cardForeground: '#eef3ff',
-    primary: '#4c83f4',
+    primary: '#2f81ff',
     primaryForeground: '#ffffff',
     secondary: '#18243a',
     secondaryForeground: '#e9efff',

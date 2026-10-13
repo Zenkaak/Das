@@ -37,10 +37,18 @@ const plans = [
   { code: "weekly", name: "Weekly", days: 7, price: 120 },
   { code: "monthly", name: "Monthly", days: 30, price: 350, popular: true },
   { code: "three_months", name: "3 Months", days: 90, price: 999 },
-  { code: "yearly", name: "Yearly", days: 365, price: 2300 },
+  { code: "yearly", name: "Yearly", days: 365, price: 2300, bestValue: true },
+] as const;
+
+const tabs = [
+  { key: "home", label: "Home", icon: "home" },
+  { key: "plans", label: "Plans", icon: "tag" },
+  { key: "activity", label: "Activity", icon: "activity" },
+  { key: "profile", label: "Profile", icon: "user" },
 ] as const;
 
 type PlanCode = (typeof plans)[number]["code"];
+type Tab = "home" | "plans" | "activity" | "profile";
 const TOKEN_KEY = "das.vpn.device-token";
 const RECOVERY_KEY = "das.vpn.recovery-key";
 const RECOVERY_SEEN_KEY = "das.vpn.recovery-viewed";
@@ -132,6 +140,7 @@ function formatExpiry(value: string): string {
 
 export default function HomeScreen() {
   const colors = useColors();
+  const [activeTab, setActiveTab] = useState<Tab>("home");
   const [sessionReady, setSessionReady] = useState(false);
   const [sessionMessage, setSessionMessage] = useState("");
   const [recoveryKey, setRecoveryKey] = useState("");
@@ -204,11 +213,12 @@ export default function HomeScreen() {
   const serversQuery = useGetVpnServers({
     query: { queryKey: ["vpn", "servers"], enabled: sessionReady, staleTime: 30_000 },
   });
-  const paymentQuery = useGetVpnPayment(paymentId, {
+  const paymentLookupId = paymentId || statusQuery.data?.latestPayment?.id || "";
+  const paymentQuery = useGetVpnPayment(paymentLookupId, {
     query: {
-      queryKey: ["vpn", "payment", paymentId],
-      enabled: sessionReady && paymentId.length > 0,
-      refetchInterval: paymentId.length > 0 ? 3000 : false,
+      queryKey: ["vpn", "payment", paymentLookupId],
+      enabled: sessionReady && paymentLookupId.length > 0,
+      refetchInterval: paymentLookupId.length > 0 ? 3000 : false,
     },
   });
 
@@ -226,6 +236,22 @@ export default function HomeScreen() {
   const nativeConnected =
     nativeSupported && statusQuery.data?.nativeTunnel.connected === true;
   const canConnect = hasActiveSubscription && nativeSupported && Boolean(selectedServer);
+  const canPurchase =
+    sessionReady &&
+    !statusQuery.isLoading &&
+    !serversQuery.isLoading &&
+    !statusQuery.isError &&
+    !serversQuery.isError &&
+    nativeSupported &&
+    servers.length > 0;
+  const paymentPauseMessage =
+    !sessionReady || statusQuery.isLoading || serversQuery.isLoading
+      ? "Checking service availability before accepting payment."
+      : statusQuery.isError || serversQuery.isError
+      ? "Service availability could not be verified. Payments are paused."
+      : !nativeSupported || servers.length === 0
+      ? "Purchases are paused until a compatible Android WireGuard client and a live server are available."
+      : "";
   const currentPlan = plans.find((plan) => plan.code === selectedPlan) ?? plans[2];
   const latestPayment = paymentQuery.data ?? statusQuery.data?.latestPayment;
 
@@ -284,6 +310,8 @@ export default function HomeScreen() {
       } else if (reason.includes("STK_PUSH_REJECTED")) {
         setPaymentAttempt(null);
         setPaymentError("Safaricom did not accept this request. No payment was taken. You can try again.");
+      } else if (reason.includes("VPN_INFRASTRUCTURE_UNAVAILABLE")) {
+        setPaymentError("VPN service is not ready yet. No payment was requested.");
       } else if (reason.includes("SERVER_NOT_CONFIGURED")) {
         setPaymentError("The secure payment backend isn’t configured yet. No payment was requested.");
       } else {
@@ -325,8 +353,16 @@ export default function HomeScreen() {
     }
   };
 
-  const statusLabel = nativeConnected ? "Protected" : "Not connected";
-  const connectReason = !hasActiveSubscription
+  const statusLabel = !sessionReady || statusQuery.isLoading
+    ? "Checking status"
+    : !nativeSupported
+    ? "VPN unavailable"
+    : nativeConnected
+    ? "Protected"
+    : "Not connected";
+  const connectReason = !sessionReady || statusQuery.isLoading
+    ? "Checking your secure device session"
+    : !hasActiveSubscription
     ? "Choose a plan to unlock access"
     : servers.length === 0
     ? "No WireGuard servers are deployed"
@@ -342,6 +378,7 @@ export default function HomeScreen() {
         style={StyleSheet.absoluteFill}
       />
       <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -373,6 +410,8 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
+        {activeTab === "home" ? (
+        <>
         <View style={styles.greeting}>
           <Text style={[styles.kicker, { color: colors.primary }]}>YOUR CONNECTION</Text>
           <Text style={[styles.headline, { color: colors.foreground }]}>
@@ -408,60 +447,43 @@ export default function HomeScreen() {
                 auraStyle,
               ]}
             />
-            <LinearGradient
-              colors={nativeConnected ? [colors.primary, colors.accent] : [colors.card, colors.secondary]}
-              style={[styles.connectOrb, { borderColor: colors.border }]}
+            <Pressable
+              disabled={!canConnect}
+              onPress={() => undefined}
+              style={({ pressed }) => [
+                styles.connectOrb,
+                { borderColor: colors.border, opacity: canConnect ? 1 : 0.76 },
+                pressed && canConnect ? styles.pressed : null,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={nativeConnected ? "Disconnect VPN" : "Connect VPN"}
+              accessibilityState={{ disabled: !canConnect }}
+              testID="vpn-connect"
             >
-              <Feather
-                name={nativeConnected ? "check" : "shield"}
-                size={36}
-                color={nativeConnected ? colors.primaryForeground : colors.mutedForeground}
-              />
-            </LinearGradient>
+              <LinearGradient
+                colors={nativeConnected ? [colors.primary, colors.accent] : [colors.card, colors.secondary]}
+                style={styles.connectOrbGradient}
+              >
+                <Feather
+                  name={nativeConnected ? "check" : "power"}
+                  size={31}
+                  color={nativeConnected ? colors.primaryForeground : colors.mutedForeground}
+                />
+                <Text style={[styles.orbLabel, { color: nativeConnected ? colors.primaryForeground : colors.mutedForeground }]}>
+                  {nativeConnected ? "DISCONNECT" : "CONNECT"}
+                </Text>
+              </LinearGradient>
+            </Pressable>
           </View>
 
           <Text style={[styles.connectionTitle, { color: colors.foreground }]}>
-            {nativeConnected ? "You're protected" : "Not connected"}
+            {nativeConnected ? "You're protected" : !nativeSupported ? "VPN unavailable" : "Not connected"}
           </Text>
           <Text style={[styles.connectionDescription, { color: colors.mutedForeground }]}>
             {nativeConnected
               ? `Connected to ${selectedServer?.name ?? "a verified server"}`
               : connectReason}
           </Text>
-
-          <View style={styles.connectActions}>
-            <Pressable
-              disabled={!canConnect}
-              onPress={() => undefined}
-              style={({ pressed }) => [
-                styles.connectButton,
-                { backgroundColor: canConnect ? colors.primary : colors.secondary },
-                pressed && canConnect ? styles.pressed : null,
-              ]}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !canConnect }}
-              testID="vpn-connect"
-            >
-              <Feather name="power" size={18} color={canConnect ? colors.primaryForeground : colors.mutedForeground} />
-              <Text style={[styles.connectButtonText, { color: canConnect ? colors.primaryForeground : colors.mutedForeground }]}>
-                {nativeConnected ? "Connected" : "Connect"}
-              </Text>
-            </Pressable>
-            <Pressable
-              disabled={!nativeConnected}
-              onPress={() => undefined}
-              style={[
-                styles.disconnectButton,
-                { borderColor: colors.border, opacity: nativeConnected ? 1 : 0.45 },
-              ]}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !nativeConnected }}
-              testID="vpn-disconnect"
-            >
-              <Feather name="square" size={16} color={colors.foreground} />
-              <Text style={[styles.disconnectButtonText, { color: colors.foreground }]}>Disconnect</Text>
-            </Pressable>
-          </View>
 
           <View style={[styles.metrics, { borderTopColor: colors.border }]}>
             <Metric label="DURATION" value="—" colors={colors} />
@@ -520,18 +542,65 @@ export default function HomeScreen() {
             </View>
             <View style={styles.serverText}>
               <Text style={[styles.serverName, { color: colors.foreground }]}>
-                {serversQuery.isLoading ? "Checking available locations" : "No server locations yet"}
+                {serversQuery.isLoading
+                  ? "Checking available locations"
+                  : serversQuery.isError
+                  ? "Server list unavailable"
+                  : "No server locations yet"}
               </Text>
               <Text style={[styles.serverCountry, { color: colors.mutedForeground }]}>
                 {serversQuery.isLoading
                   ? "Looking up the live server list"
+                  : serversQuery.isError
+                  ? "Could not verify availability right now. Try again shortly."
                   : "WireGuard servers must be deployed before a location can be selected."}
               </Text>
             </View>
             {serversQuery.isLoading ? <ActivityIndicator color={colors.primary} /> : null}
           </View>
         )}
+        <View style={styles.subscriptionShortcut}>
+          <View style={styles.serverText}>
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+              {hasActiveSubscription ? "Your subscription" : "Choose your plan"}
+            </Text>
+            <Text style={[styles.sectionCaption, { color: colors.mutedForeground }]}>
+              {hasActiveSubscription && subscription?.expiresAt
+                ? `${getPlanName(subscription.planCode)} · expires ${formatExpiry(subscription.expiresAt)}`
+                : "One-time payments · no recurring deductions"}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => setActiveTab("plans")}
+            style={[styles.smallAction, { backgroundColor: colors.secondary, borderColor: colors.border }]}
+            accessibilityRole="button"
+            testID="open-plans"
+          >
+            <Text style={[styles.smallActionText, { color: colors.primary }]}>
+              {hasActiveSubscription ? "Manage" : "View plans"}
+            </Text>
+            <Feather name="arrow-right" size={14} color={colors.primary} />
+          </Pressable>
+        </View>
+        {hasActiveSubscription && subscription?.expiresAt ? (
+          <View style={[styles.expiryCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+            <Feather name="calendar" size={17} color={colors.primary} />
+            <View style={styles.serverText}>
+              <Text style={[styles.expiryTitle, { color: colors.foreground }]}>
+                {getPlanName(subscription.planCode)} access
+              </Text>
+              <Text style={[styles.expiryText, { color: colors.mutedForeground }]}>
+                Expires {formatExpiry(subscription.expiresAt)}
+              </Text>
+            </View>
+            <Feather name="check" size={17} color={colors.primary} />
+          </View>
+        ) : null}
+        </>
+        ) : null}
 
+        {activeTab === "plans" ? (
+        <>
         <View style={styles.sectionHeading}>
           <View>
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Plans for real life</Text>
@@ -541,6 +610,13 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {!canPurchase ? (
+          <View style={[styles.noticeCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            <Feather name="info" size={17} color={colors.accent} />
+            <Text style={[styles.noticeText, { color: colors.mutedForeground }]}>{paymentPauseMessage}</Text>
+          </View>
+        ) : null}
+
         <View style={styles.planGrid}>
           {plans.map((plan) => {
             const active = subscription?.planCode === plan.code;
@@ -548,6 +624,7 @@ export default function HomeScreen() {
               <Pressable
                 key={plan.code}
                 onPress={() => {
+                  if (!canPurchase) return;
                   setSelectedPlan(plan.code);
                   setPaymentError("");
                   setPaymentNotice("");
@@ -559,16 +636,24 @@ export default function HomeScreen() {
                   {
                     backgroundColor: colors.card,
                     borderColor: active ? colors.primary : colors.border,
+                    opacity: canPurchase ? 1 : 0.6,
                   },
-                  pressed ? styles.pressed : null,
+                  pressed && canPurchase ? styles.pressed : null,
                 ]}
+                disabled={!canPurchase}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: !canPurchase }}
                 accessibilityLabel={`${plan.name} plan, ${plan.price} Kenyan shillings`}
                 testID={`plan-${plan.code}`}
               >
                 {"popular" in plan && plan.popular ? (
                   <View style={[styles.popularTag, { backgroundColor: colors.accent }]}>
                     <Text style={[styles.popularTagText, { color: colors.background }]}>MOST POPULAR</Text>
+                  </View>
+                ) : null}
+                {"bestValue" in plan && plan.bestValue ? (
+                  <View style={[styles.popularTag, { backgroundColor: colors.primary }]}>
+                    <Text style={[styles.popularTagText, { color: colors.primaryForeground }]}>BEST VALUE</Text>
                   </View>
                 ) : null}
                 <Text style={[styles.planName, { color: colors.mutedForeground }]}>{plan.name}</Text>
@@ -586,8 +671,10 @@ export default function HomeScreen() {
             );
           })}
         </View>
+        </>
+        ) : null}
 
-        {hasActiveSubscription && subscription?.expiresAt ? (
+        {activeTab === "plans" && hasActiveSubscription && subscription?.expiresAt ? (
           <View style={[styles.expiryCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
             <Feather name="calendar" size={17} color={colors.primary} />
             <View style={styles.serverText}>
@@ -602,7 +689,146 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {latestPayment ? (
+        {activeTab === "activity" ? (
+          <>
+            <View style={styles.greeting}>
+              <Text style={[styles.kicker, { color: colors.primary }]}>YOUR ACTIVITY</Text>
+              <Text style={[styles.headline, { color: colors.foreground }]}>Payments & connection.</Text>
+              <Text style={[styles.subheadline, { color: colors.mutedForeground }]}>
+                Only verified payment events and real tunnel data are shown here.
+              </Text>
+            </View>
+            <View style={[styles.activityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.activityHeading}>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Latest payment</Text>
+                {paymentQuery.isLoading ? <ActivityIndicator color={colors.primary} size="small" /> : null}
+              </View>
+              {!sessionReady || statusQuery.isLoading ? (
+                <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
+                  Checking secure payment records…
+                </Text>
+              ) : statusQuery.isError ? (
+                <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
+                  Payment activity is unavailable until the secure service responds.
+                </Text>
+              ) : latestPayment ? (
+                <>
+                  <Text style={[styles.activityTitle, { color: colors.foreground }]}>
+                    {getPlanName(latestPayment.planCode)}
+                    {paymentQuery.data
+                      ? ` · KES ${paymentQuery.data.amountKes.toLocaleString("en-KE")}`
+                      : ""}
+                  </Text>
+                  <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
+                    {latestPayment.status === "paid"
+                      ? "Verified by Safaricom"
+                      : latestPayment.status === "pending"
+                      ? "Waiting for Safaricom verification"
+                      : latestPayment.status === "cancelled"
+                      ? "Cancelled · no access activated"
+                      : "Not verified · no access activated"}
+                  </Text>
+                </>
+              ) : (
+                <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
+                  No payment activity is recorded for this device yet.
+                </Text>
+              )}
+            </View>
+            <View style={[styles.activityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.activityHeading}>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Connection activity</Text>
+                <Feather name="activity" size={17} color={colors.accent} />
+              </View>
+              <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
+                {nativeSupported
+                  ? nativeConnected
+                    ? "A real WireGuard tunnel is active."
+                    : "No WireGuard connection is active."
+                  : "Tunnel duration and traffic are unavailable until a real WireGuard client and server are deployed."}
+              </Text>
+            </View>
+            {sessionMessage || statusQuery.isError ? (
+              <View style={[styles.errorCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+                <Feather name="wifi-off" size={17} color={colors.destructive} />
+                <Text style={[styles.errorText, { color: colors.mutedForeground }]}>
+                  {sessionMessage || "Secure activity could not be refreshed."}
+                </Text>
+              </View>
+            ) : null}
+          </>
+        ) : null}
+
+        {activeTab === "profile" ? (
+          <>
+            <View style={styles.greeting}>
+              <Text style={[styles.kicker, { color: colors.primary }]}>PRIVATE BY DESIGN</Text>
+              <Text style={[styles.headline, { color: colors.foreground }]}>Your device.</Text>
+              <Text style={[styles.subheadline, { color: colors.mutedForeground }]}>
+                No registration, login, or password. Your session is anonymous and tied to this device.
+              </Text>
+            </View>
+            <View style={[styles.activityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.activityHeading}>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Anonymous device session</Text>
+                <Feather
+                  name={sessionReady ? "check-circle" : "shield"}
+                  size={18}
+                  color={sessionReady ? colors.primary : colors.mutedForeground}
+                />
+              </View>
+              <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
+                {sessionReady
+                  ? "A secure session is established for this device."
+                  : sessionMessage || "The secure device session is being established."}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => {
+                setPaymentError("");
+                setShowRecovery(false);
+                setRecoveryInput("");
+                setRecovering(false);
+                setShowRecovery(true);
+              }}
+              style={[styles.profileAction, { backgroundColor: colors.card, borderColor: colors.border }]}
+              accessibilityRole="button"
+              testID="profile-recovery"
+            >
+              <View style={[styles.emptyIcon, { backgroundColor: colors.secondary }]}>
+                <Feather name="key" size={17} color={colors.accent} />
+              </View>
+              <View style={styles.serverText}>
+                <Text style={[styles.serverName, { color: colors.foreground }]}>Device recovery key</Text>
+                <Text style={[styles.serverCountry, { color: colors.mutedForeground }]}>
+                  {recoveryKey ? "Stored securely on this device" : "Restore access or save your recovery key"}
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+            </Pressable>
+            {hasActiveSubscription && subscription?.expiresAt ? (
+              <View style={[styles.expiryCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+                <Feather name="calendar" size={17} color={colors.primary} />
+                <View style={styles.serverText}>
+                  <Text style={[styles.expiryTitle, { color: colors.foreground }]}>
+                    {getPlanName(subscription.planCode)} access
+                  </Text>
+                  <Text style={[styles.expiryText, { color: colors.mutedForeground }]}>
+                    Expires {formatExpiry(subscription.expiresAt)}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+            <View style={styles.footer}>
+              <Feather name="repeat" size={14} color={colors.mutedForeground} />
+              <Text style={[styles.footerText, { color: colors.mutedForeground }]}>
+                Renewals preserve remaining paid time. There are no free trials or recurring deductions.
+              </Text>
+            </View>
+          </>
+        ) : null}
+
+        {activeTab === "home" && latestPayment ? (
           <View style={[styles.noticeCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
             <Feather
               name={latestPayment.status === "paid" ? "check-circle" : latestPayment.status === "pending" ? "clock" : "alert-circle"}
@@ -621,14 +847,15 @@ export default function HomeScreen() {
                 : paymentNotice}
             </Text>
           </View>
-        ) : paymentNotice ? (
+        ) : activeTab === "home" && paymentNotice ? (
           <View style={[styles.noticeCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
             <Feather name="info" size={17} color={colors.accent} />
             <Text style={[styles.noticeText, { color: colors.mutedForeground }]}>{paymentNotice}</Text>
           </View>
         ) : null}
 
-        {sessionMessage || statusQuery.isError || serversQuery.isError ? (
+        {(activeTab === "home" || activeTab === "profile") &&
+        (sessionMessage || statusQuery.isError || serversQuery.isError) ? (
           <View style={[styles.errorCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
             <Feather name="wifi-off" size={17} color={colors.destructive} />
             <View style={styles.serverText}>
@@ -643,6 +870,8 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
+        {activeTab === "home" ? (
+        <>
         <View style={styles.footer}>
           <Feather name="lock" size={14} color={colors.mutedForeground} />
           <Text style={[styles.footerText, { color: colors.mutedForeground }]}>
@@ -655,7 +884,31 @@ export default function HomeScreen() {
             Renew any time. Remaining paid access is preserved. No recurring deductions.
           </Text>
         </View>
+        </>
+        ) : null}
       </ScrollView>
+
+      <View style={[styles.bottomNav, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        {tabs.map((tab) => {
+          const selected = activeTab === tab.key;
+          return (
+            <Pressable
+              key={tab.key}
+              onPress={() => setActiveTab(tab.key)}
+              style={styles.navButton}
+              accessibilityRole="tab"
+              accessibilityState={{ selected }}
+              accessibilityLabel={tab.label}
+              testID={`tab-${tab.key}`}
+            >
+              <Feather name={tab.icon} size={19} color={selected ? colors.primary : colors.mutedForeground} />
+              <Text style={[styles.navLabel, { color: selected ? colors.primary : colors.mutedForeground }]}>
+                {tab.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
 
       <Modal
         visible={paymentOpen}
@@ -854,7 +1107,8 @@ function Metric({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  content: { paddingHorizontal: 22, paddingTop: 67, paddingBottom: 48, maxWidth: 620, width: "100%", alignSelf: "center" },
+  scrollView: { flex: 1 },
+  content: { paddingHorizontal: 22, paddingTop: 67, paddingBottom: 28, maxWidth: 620, width: "100%", alignSelf: "center" },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 34 },
   brand: { flexDirection: "row", alignItems: "center", gap: 11 },
   brandMark: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
@@ -871,16 +1125,13 @@ const styles = StyleSheet.create({
   statusDot: { width: 7, height: 7, borderRadius: 4 },
   statusText: { fontSize: 9, fontFamily: "Inter_700Bold", letterSpacing: 1.4 },
   noAccountTag: { fontSize: 8, fontFamily: "Inter_700Bold", letterSpacing: 1 },
-  orbWrap: { height: 150, alignItems: "center", justifyContent: "center", marginTop: 1 },
-  orbGlow: { position: "absolute", width: 106, height: 106, borderRadius: 54, opacity: 0.5 },
-  connectOrb: { width: 96, height: 96, borderRadius: 49, borderWidth: 1, alignItems: "center", justifyContent: "center", elevation: 8 },
+  orbWrap: { height: 182, alignItems: "center", justifyContent: "center", marginTop: 3 },
+  orbGlow: { position: "absolute", width: 164, height: 164, borderRadius: 82, opacity: 0.5 },
+  connectOrb: { width: 150, height: 150, borderRadius: 76, borderWidth: 1, overflow: "hidden", elevation: 8 },
+  connectOrbGradient: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
+  orbLabel: { fontSize: 10, fontFamily: "Inter_700Bold", letterSpacing: 1.4 },
   connectionTitle: { textAlign: "center", fontSize: 21, fontFamily: "Inter_700Bold", letterSpacing: -0.35 },
   connectionDescription: { textAlign: "center", fontSize: 11, fontFamily: "Inter_500Medium", marginTop: 6 },
-  connectActions: { flexDirection: "row", gap: 10, marginTop: 20 },
-  connectButton: { flex: 1, minHeight: 48, borderRadius: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 9 },
-  connectButtonText: { fontSize: 13, fontFamily: "Inter_700Bold" },
-  disconnectButton: { minHeight: 48, minWidth: 120, borderRadius: 16, borderWidth: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  disconnectButtonText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   pressed: { opacity: 0.78, transform: [{ scale: 0.985 }] },
   metrics: { flexDirection: "row", alignItems: "center", borderTopWidth: 1, marginTop: 17, paddingTop: 14 },
   metric: { flex: 1, alignItems: "center" },
@@ -891,6 +1142,9 @@ const styles = StyleSheet.create({
   sectionHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 28, marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontFamily: "Inter_700Bold", letterSpacing: -0.2 },
   sectionCaption: { marginTop: 4, fontSize: 10, fontFamily: "Inter_400Regular" },
+  subscriptionShortcut: { marginTop: 22, padding: 14, borderRadius: 18, backgroundColor: "rgba(16, 26, 44, 0.74)", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  smallAction: { minHeight: 38, borderWidth: 1, borderRadius: 12, paddingHorizontal: 11, flexDirection: "row", alignItems: "center", gap: 6 },
+  smallActionText: { fontSize: 10, fontFamily: "Inter_600SemiBold" },
   emptyServer: { minHeight: 72, borderWidth: 1, borderRadius: 18, paddingHorizontal: 13, paddingVertical: 12, flexDirection: "row", alignItems: "center", gap: 12 },
   emptyIcon: { height: 38, width: 38, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   serverList: { gap: 8 },
@@ -914,11 +1168,19 @@ const styles = StyleSheet.create({
   expiryText: { marginTop: 3, fontSize: 9, fontFamily: "Inter_400Regular" },
   noticeCard: { borderWidth: 1, borderRadius: 15, padding: 12, marginTop: 13, flexDirection: "row", alignItems: "center", gap: 10 },
   noticeText: { flex: 1, fontSize: 10, lineHeight: 15, fontFamily: "Inter_400Regular" },
+  activityCard: { borderWidth: 1, borderRadius: 18, padding: 15, marginBottom: 12 },
+  activityHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  activityTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  activityText: { fontSize: 11, lineHeight: 17, fontFamily: "Inter_400Regular" },
+  profileAction: { minHeight: 68, borderWidth: 1, borderRadius: 17, paddingHorizontal: 12, paddingVertical: 11, flexDirection: "row", alignItems: "center", gap: 12 },
   errorCard: { borderWidth: 1, borderRadius: 15, padding: 12, marginTop: 14, flexDirection: "row", alignItems: "center", gap: 10 },
   errorTitle: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
   errorText: { marginTop: 3, fontSize: 9, lineHeight: 14, fontFamily: "Inter_400Regular" },
   footer: { flexDirection: "row", alignItems: "flex-start", gap: 9, marginTop: 16, paddingHorizontal: 2 },
   footerText: { flex: 1, fontSize: 9, lineHeight: 14, fontFamily: "Inter_400Regular" },
+  bottomNav: { minHeight: 72, borderTopWidth: 1, paddingTop: 8, paddingBottom: 16, paddingHorizontal: 14, flexDirection: "row", justifyContent: "space-around" },
+  navButton: { flex: 1, alignItems: "center", justifyContent: "center", gap: 4 },
+  navLabel: { fontSize: 9, fontFamily: "Inter_600SemiBold" },
   modalScrim: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(3, 8, 18, 0.78)" },
   paymentSheet: { borderWidth: 1, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 22, paddingTop: 11, paddingBottom: 34 },
   sheetHandle: { width: 38, height: 4, borderRadius: 4, alignSelf: "center", marginBottom: 19 },

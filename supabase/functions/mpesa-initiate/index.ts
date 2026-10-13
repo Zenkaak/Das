@@ -97,11 +97,37 @@ Deno.serve(async (request) => {
       }, payment.status === "pending" ? 202 : 200);
     }
 
+    const outstanding = await database<Array<{
+      id: string; plan_code: string; amount_kes: number; status: string;
+    }>>(
+      `das_vpn_payments?session_id=eq.${session.id}&status=eq.pending&select=id,plan_code,amount_kes,status&order=created_at.desc&limit=1`,
+    );
+    if (outstanding[0]) {
+      return json({
+        error: "A payment for this device is still being verified",
+        code: "PAYMENT_REQUEST_PENDING",
+      }, 409);
+    }
+
     const plans = await database<Array<{ code: string; label: string; amount_kes: number }>>(
       `das_vpn_plans?code=eq.${planCode}&select=code,label,amount_kes&limit=1`,
     );
     const plan = plans[0];
     if (!plan) return json({ error: "Subscription plan is unavailable", code: "PLAN_UNAVAILABLE" }, 404);
+
+    const servers = await database<Array<{ id: string }>>(
+      "das_vpn_servers?enabled=eq.true&select=id&limit=1",
+    );
+    if (
+      servers.length === 0 ||
+      !Deno.env.get("WIREGUARD_CONTROLLER_URL") ||
+      !Deno.env.get("WIREGUARD_CONTROLLER_TOKEN")
+    ) {
+      return json({
+        error: "VPN infrastructure is unavailable; no payment was requested",
+        code: "VPN_INFRASTRUCTURE_UNAVAILABLE",
+      }, 503);
+    }
 
     const payments = await database<Array<{ id: string }>>(
       "das_vpn_payments",
