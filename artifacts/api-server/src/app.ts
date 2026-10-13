@@ -30,6 +30,10 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.get("/", (_req, res) => {
+  res.json({ service: "DAS VPN API", status: "ok", health: "/api/healthz" });
+});
+
 app.use("/api", router);
 
 export default app;
