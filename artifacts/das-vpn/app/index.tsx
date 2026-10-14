@@ -43,12 +43,12 @@ const plans = [
 const tabs = [
   { key: "home", label: "Home", icon: "home" },
   { key: "plans", label: "Plans", icon: "tag" },
-  { key: "activity", label: "Activity", icon: "activity" },
+  { key: "subscriptions", label: "Subscriptions", icon: "credit-card" },
   { key: "profile", label: "Profile", icon: "user" },
 ] as const;
 
 type PlanCode = (typeof plans)[number]["code"];
-type Tab = "home" | "plans" | "activity" | "profile";
+type Tab = "home" | "plans" | "subscriptions" | "profile";
 const TOKEN_KEY = "das.vpn.device-token";
 const RECOVERY_KEY = "das.vpn.recovery-key";
 const RECOVERY_SEEN_KEY = "das.vpn.recovery-viewed";
@@ -228,6 +228,9 @@ export default function HomeScreen() {
     [servers, selectedServerId],
   );
   const subscription = statusQuery.data?.subscription;
+  const subscriptionPlan = subscription
+    ? plans.find((plan) => plan.code === subscription.planCode)
+    : undefined;
   const hasActiveSubscription = Boolean(
     subscription?.expiresAt && new Date(subscription.expiresAt).getTime() > Date.now(),
   );
@@ -689,14 +692,83 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {activeTab === "activity" ? (
+        {activeTab === "subscriptions" ? (
           <>
             <View style={styles.greeting}>
-              <Text style={[styles.kicker, { color: colors.primary }]}>YOUR ACTIVITY</Text>
-              <Text style={[styles.headline, { color: colors.foreground }]}>Payments & connection.</Text>
+              <Text style={[styles.kicker, { color: colors.primary }]}>YOUR SUBSCRIPTIONS</Text>
+              <Text style={[styles.headline, { color: colors.foreground }]}>Your plan.</Text>
               <Text style={[styles.subheadline, { color: colors.mutedForeground }]}>
-                Only verified payment events and real tunnel data are shown here.
+                Track verified subscription access and expiry. A payment confirmation is not a VPN connection.
               </Text>
+            </View>
+            <View style={[styles.activityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.activityHeading}>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Current subscription</Text>
+                <Feather
+                  name={hasActiveSubscription ? "check-circle" : "calendar"}
+                  size={17}
+                  color={hasActiveSubscription ? colors.primary : colors.mutedForeground}
+                />
+              </View>
+              {!sessionReady || statusQuery.isLoading ? (
+                <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
+                  Checking your subscription…
+                </Text>
+              ) : statusQuery.isError ? (
+                <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
+                  Subscription details are unavailable until the secure service responds.
+                </Text>
+              ) : hasActiveSubscription && subscription?.expiresAt ? (
+                <>
+                  <Text style={[styles.activityTitle, { color: colors.foreground }]}>
+                    {getPlanName(subscription.planCode)} · Active
+                  </Text>
+                  <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
+                    {subscriptionPlan ? `KES ${subscriptionPlan.price.toLocaleString("en-KE")} · ` : ""}
+                    Expires {formatExpiry(subscription.expiresAt)}
+                  </Text>
+                  <View style={[styles.noticeCard, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
+                    <Feather
+                      name={nativeConnected ? "shield" : "wifi-off"}
+                      size={16}
+                      color={nativeConnected ? colors.primary : colors.mutedForeground}
+                    />
+                    <Text style={[styles.noticeText, { color: colors.mutedForeground }]}>
+                      {nativeConnected
+                        ? "WireGuard tunnel confirmed by the Android client."
+                        : nativeSupported
+                        ? "Your subscription is active. The VPN is not connected."
+                        : "Your subscription is active. VPN connection is unavailable until the Android WireGuard client and server are deployed."}
+                    </Text>
+                  </View>
+                </>
+              ) : latestPayment?.status === "pending" ? (
+                <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
+                  Your M-Pesa payment is waiting for Safaricom verification. Access stays locked until it is confirmed.
+                </Text>
+              ) : (
+                <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
+                  No active subscription. Choose a plan to view the available options.
+                </Text>
+              )}
+              <Pressable
+                onPress={() => setActiveTab("plans")}
+                style={[styles.profileAction, { backgroundColor: colors.secondary, borderColor: colors.border, marginTop: 14 }]}
+                accessibilityRole="button"
+                accessibilityLabel="View subscription plans"
+                testID="subscriptions-view-plans"
+              >
+                <View style={[styles.emptyIcon, { backgroundColor: colors.card }]}>
+                  <Feather name="tag" size={17} color={colors.primary} />
+                </View>
+                <View style={styles.serverText}>
+                  <Text style={[styles.serverName, { color: colors.foreground }]}>View plans</Text>
+                  <Text style={[styles.serverCountry, { color: colors.mutedForeground }]}>
+                    One-time M-Pesa payment · no auto-renewal
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+              </Pressable>
             </View>
             <View style={[styles.activityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.activityHeading}>
@@ -709,7 +781,7 @@ export default function HomeScreen() {
                 </Text>
               ) : statusQuery.isError ? (
                 <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
-                  Payment activity is unavailable until the secure service responds.
+                  Payment status could not be refreshed.
                 </Text>
               ) : latestPayment ? (
                 <>
@@ -725,34 +797,21 @@ export default function HomeScreen() {
                       : latestPayment.status === "pending"
                       ? "Waiting for Safaricom verification"
                       : latestPayment.status === "cancelled"
-                      ? "Cancelled · no access activated"
-                      : "Not verified · no access activated"}
+                      ? "Cancelled · no subscription activated"
+                      : "Not verified · no subscription activated"}
                   </Text>
                 </>
               ) : (
                 <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
-                  No payment activity is recorded for this device yet.
+                  No subscription payments are recorded for this device yet.
                 </Text>
               )}
-            </View>
-            <View style={[styles.activityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={styles.activityHeading}>
-                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Connection activity</Text>
-                <Feather name="activity" size={17} color={colors.accent} />
-              </View>
-              <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
-                {nativeSupported
-                  ? nativeConnected
-                    ? "A real WireGuard tunnel is active."
-                    : "No WireGuard connection is active."
-                  : "Tunnel duration and traffic are unavailable until a real WireGuard client and server are deployed."}
-              </Text>
             </View>
             {sessionMessage || statusQuery.isError ? (
               <View style={[styles.errorCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
                 <Feather name="wifi-off" size={17} color={colors.destructive} />
                 <Text style={[styles.errorText, { color: colors.mutedForeground }]}>
-                  {sessionMessage || "Secure activity could not be refreshed."}
+                  {sessionMessage || "Subscription details could not be refreshed."}
                 </Text>
               </View>
             ) : null}

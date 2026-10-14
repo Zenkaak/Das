@@ -19,15 +19,15 @@ function proxyToSupabase(functionName: string, method: Method) {
       return;
     }
 
-    const headers = new Headers({ accept: "application/json" });
+    const headers: Record<string, string> = { accept: "application/json" };
     const authorization = req.header("authorization");
-    if (authorization) headers.set("authorization", authorization);
+    if (authorization) headers.authorization = authorization;
 
     const options: FetchRequestInit = { method, headers, signal: AbortSignal.timeout(45_000) };
     if (method === "POST") {
-      headers.set("content-type", "application/json");
+      headers["content-type"] = "application/json";
       if (req.header("idempotency-key")) {
-        headers.set("idempotency-key", req.header("idempotency-key")!);
+        headers["idempotency-key"] = req.header("idempotency-key")!;
       }
       if (req.body && Object.keys(req.body).length > 0) {
         options.body = JSON.stringify(req.body);
