@@ -1,4 +1,4 @@
-import app from "./app";
+import app from "./app.js";
 import { logger } from "./lib/logger";
 
 export default app;
