@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: vpn
+    description: Anonymous VPN device, subscription, and payment operations
 paths:
   /healthz:
     get:
@@ -24,7 +26,182 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /vpn/session:
+    post:
+      operationId: createVpnSession
+      tags: [vpn]
+      summary: Create an anonymous device session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "200":
+          description: Session created or already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+  /vpn/recovery:
+    post:
+      operationId: recoverVpnSession
+      tags: [vpn]
+      summary: Recover and rotate an anonymous device session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecoverSessionRequest"
+      responses:
+        "200":
+          description: Session recovered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+  /vpn/status:
+    get:
+      operationId: getVpnStatus
+      tags: [vpn]
+      summary: Read subscription and VPN status for this device
+      security:
+        - deviceSession: []
+      responses:
+        "200":
+          description: Current anonymous subscription status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VpnStatus"
+        "401":
+          $ref: "#/components/responses/Error"
+  /vpn/servers:
+    get:
+      operationId: getVpnServers
+      tags: [vpn]
+      summary: List currently deployed VPN servers
+      security:
+        - deviceSession: []
+      responses:
+        "200":
+          description: Configured, available server locations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerList"
+  /vpn/payments:
+    post:
+      operationId: createVpnPayment
+      tags: [vpn]
+      summary: Request an M-Pesa STK Push for a fixed subscription plan
+      security:
+        - deviceSession: []
+      parameters:
+        - in: header
+          name: idempotency-key
+          required: true
+          schema:
+            type: string
+            minLength: 16
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePaymentRequest"
+      responses:
+        "202":
+          description: Safaricom accepted the STK Push request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /vpn/payments/{paymentId}:
+    get:
+      operationId: getVpnPayment
+      tags: [vpn]
+      summary: Read a payment status owned by this device session
+      security:
+        - deviceSession: []
+      parameters:
+        - in: path
+          name: paymentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Payment status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+  /vpn/connect:
+    post:
+      operationId: connectVpnDevice
+      tags: [vpn]
+      summary: Provision a WireGuard peer for a paid device
+      security:
+        - deviceSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectRequest"
+      responses:
+        "200":
+          description: Peer provisioning result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectResponse"
+        "403":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /vpn/disconnect:
+    post:
+      operationId: disconnectVpnDevice
+      tags: [vpn]
+      summary: Revoke this device's WireGuard peer
+      security:
+        - deviceSession: []
+      responses:
+        "200":
+          description: Peer revoke result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisconnectResponse"
 components:
+  securitySchemes:
+    deviceSession:
+      type: http
+      scheme: bearer
+      bearerFormat: Opaque device token
+  responses:
+    Error:
+      description: A safe error response with no payment credentials or PIN data
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
   schemas:
     HealthStatus:
       type: object
@@ -33,4 +210,166 @@ components:
           type: string
       required:
         - status
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+      required: [error]
+    CreateSessionRequest:
+      type: object
+      properties:
+        deviceToken:
+          type: string
+          minLength: 64
+          maxLength: 64
+        recoveryKey:
+          type: string
+          minLength: 64
+          maxLength: 64
+      required: [deviceToken, recoveryKey]
+    RecoverSessionRequest:
+      type: object
+      properties:
+        recoveryKey:
+          type: string
+          minLength: 64
+          maxLength: 64
+        deviceToken:
+          type: string
+          minLength: 64
+          maxLength: 64
+        nextRecoveryKey:
+          type: string
+          minLength: 64
+          maxLength: 64
+      required: [recoveryKey, deviceToken, nextRecoveryKey]
+    SessionResponse:
+      type: object
+      properties:
+        ready:
+          type: boolean
+        recovered:
+          type: boolean
+      required: [ready, recovered]
+    VpnStatus:
+      type: object
+      properties:
+        subscription:
+          type: object
+          nullable: true
+          properties:
+            planCode:
+              type: string
+            expiresAt:
+              type: string
+              format: date-time
+          required: [planCode, expiresAt]
+        nativeTunnel:
+          type: object
+          properties:
+            supported:
+              type: boolean
+            connected:
+              type: boolean
+          required: [supported, connected]
+        latestPayment:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: string
+              format: uuid
+            status:
+              type: string
+              enum: [pending, paid, failed, cancelled, expired]
+            planCode:
+              type: string
+          required: [id, status, planCode]
+      required: [subscription, nativeTunnel, latestPayment]
+    Server:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        countryCode:
+          type: string
+        city:
+          type: string
+        country:
+          type: string
+        latencyMs:
+          type: integer
+          nullable: true
+      required: [id, name, countryCode, city, country]
+    ServerList:
+      type: object
+      properties:
+        servers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Server"
+      required: [servers]
+    CreatePaymentRequest:
+      type: object
+      properties:
+        planCode:
+          type: string
+          enum: [three_days, weekly, monthly, three_months, yearly]
+        phoneNumber:
+          type: string
+          minLength: 10
+          maxLength: 13
+      required: [planCode, phoneNumber]
+    PaymentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, paid, failed, cancelled, expired]
+        planCode:
+          type: string
+        amountKes:
+          type: integer
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        message:
+          type: string
+          nullable: true
+      required: [id, status, planCode, amountKes]
+    ConnectRequest:
+      type: object
+      properties:
+        serverId:
+          type: string
+          format: uuid
+        publicKey:
+          type: string
+          minLength: 40
+          maxLength: 64
+      required: [serverId, publicKey]
+    ConnectResponse:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        message:
+          type: string
+      required: [connected, message]
+    DisconnectResponse:
+      type: object
+      properties:
+        disconnected:
+          type: boolean
+      required: [disconnected]
 
