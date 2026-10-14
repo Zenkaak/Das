@@ -115,20 +115,6 @@ Deno.serve(async (request) => {
     const plan = plans[0];
     if (!plan) return json({ error: "Subscription plan is unavailable", code: "PLAN_UNAVAILABLE" }, 404);
 
-    const servers = await database<Array<{ id: string }>>(
-      "das_vpn_servers?enabled=eq.true&select=id&limit=1",
-    );
-    if (
-      servers.length === 0 ||
-      !Deno.env.get("WIREGUARD_CONTROLLER_URL") ||
-      !Deno.env.get("WIREGUARD_CONTROLLER_TOKEN")
-    ) {
-      return json({
-        error: "VPN infrastructure is unavailable; no payment was requested",
-        code: "VPN_INFRASTRUCTURE_UNAVAILABLE",
-      }, 503);
-    }
-
     const payments = await database<Array<{ id: string }>>(
       "das_vpn_payments",
       {

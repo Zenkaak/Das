@@ -13,8 +13,8 @@ import {
 } from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import * as SecureStore from 'expo-secure-store';
 import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
+import { getSessionValue, TOKEN_KEY } from '@/lib/sessionStorage';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -22,7 +22,7 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 const apiDomain = process.env.EXPO_PUBLIC_DOMAIN;
 setBaseUrl(apiDomain ? `https://${apiDomain}` : null);
-setAuthTokenGetter(() => SecureStore.getItemAsync('das.vpn.device-token'));
+setAuthTokenGetter(() => getSessionValue(TOKEN_KEY));
 
 function RootLayoutNav() {
   return (

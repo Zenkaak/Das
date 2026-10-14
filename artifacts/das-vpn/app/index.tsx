@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Keyboard,
@@ -14,7 +14,6 @@ import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Crypto from "expo-crypto";
 import * as Haptics from "expo-haptics";
-import * as SecureStore from "expo-secure-store";
 import Svg, { Line, Rect } from "react-native-svg";
 import Animated, {
   useAnimatedStyle,
@@ -27,10 +26,16 @@ import {
   createVpnSession,
   recoverVpnSession,
   useGetVpnPayment,
-  useGetVpnServers,
   useGetVpnStatus,
 } from "@workspace/api-client-react";
 import { useColors } from "@/hooks/useColors";
+import {
+  getSessionValue,
+  RECOVERY_KEY,
+  RECOVERY_SEEN_KEY,
+  setSessionValue,
+  TOKEN_KEY,
+} from "@/lib/sessionStorage";
 
 const plans = [
   { code: "three_days", name: "3 Days", days: 3, price: 80 },
@@ -40,19 +45,20 @@ const plans = [
   { code: "yearly", name: "Yearly", days: 365, price: 2300, bestValue: true },
 ] as const;
 
+const designServers = [
+  { countryCode: "DE", country: "Germany", city: "Frankfurt" },
+  { countryCode: "NL", country: "Netherlands", city: "Amsterdam" },
+] as const;
+
 const tabs = [
   { key: "home", label: "Home", icon: "home" },
   { key: "plans", label: "Plans", icon: "tag" },
-  { key: "subscriptions", label: "Subscriptions", icon: "credit-card" },
+  { key: "subscriptions", label: "Activity", icon: "clock" },
   { key: "profile", label: "Profile", icon: "user" },
 ] as const;
 
 type PlanCode = (typeof plans)[number]["code"];
 type Tab = "home" | "plans" | "subscriptions" | "profile";
-const TOKEN_KEY = "das.vpn.device-token";
-const RECOVERY_KEY = "das.vpn.recovery-key";
-const RECOVERY_SEEN_KEY = "das.vpn.recovery-viewed";
-const NATIVE_WIREGUARD_CLIENT_AVAILABLE = false;
 
 function randomHex(byteCount: number): Promise<string> {
   return Crypto.getRandomBytesAsync(byteCount).then((bytes) =>
@@ -148,7 +154,6 @@ export default function HomeScreen() {
   const [recoveryInput, setRecoveryInput] = useState("");
   const [recovering, setRecovering] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanCode>("monthly");
-  const [selectedServerId, setSelectedServerId] = useState("");
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentPhone, setPaymentPhone] = useState("");
   const [paymentError, setPaymentError] = useState("");
@@ -174,8 +179,8 @@ export default function HomeScreen() {
     setSessionMessage("");
     setSessionReady(false);
     try {
-      const storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
-      const storedRecovery = await SecureStore.getItemAsync(RECOVERY_KEY);
+      const storedToken = await getSessionValue(TOKEN_KEY);
+      const storedRecovery = await getSessionValue(RECOVERY_KEY);
       const isNewSession = !storedToken || !storedRecovery;
       let token: string;
       let recovery: string;
@@ -185,11 +190,11 @@ export default function HomeScreen() {
       } else {
         token = await randomHex(32);
         recovery = await randomHex(32);
-        await SecureStore.setItemAsync(TOKEN_KEY, token);
-        await SecureStore.setItemAsync(RECOVERY_KEY, recovery);
+        await setSessionValue(TOKEN_KEY, token);
+        await setSessionValue(RECOVERY_KEY, recovery);
       }
       setRecoveryKey(recovery);
-      if (isNewSession && (await SecureStore.getItemAsync(RECOVERY_SEEN_KEY)) !== "yes") {
+      if (isNewSession && (await getSessionValue(RECOVERY_SEEN_KEY)) !== "yes") {
         setShowRecovery(true);
       }
       await createVpnSession({ deviceToken: token, recoveryKey: recovery });
@@ -210,9 +215,6 @@ export default function HomeScreen() {
       refetchInterval: sessionReady ? 5000 : false,
     },
   });
-  const serversQuery = useGetVpnServers({
-    query: { queryKey: ["vpn", "servers"], enabled: sessionReady, staleTime: 30_000 },
-  });
   const paymentLookupId = paymentId || statusQuery.data?.latestPayment?.id || "";
   const paymentQuery = useGetVpnPayment(paymentLookupId, {
     query: {
@@ -222,44 +224,30 @@ export default function HomeScreen() {
     },
   });
 
-  const servers = serversQuery.data?.servers ?? [];
-  const selectedServer = useMemo(
-    () => servers.find((server) => server.id === selectedServerId),
-    [servers, selectedServerId],
-  );
-  const subscription = statusQuery.data?.subscription;
+  const paymentSubscription =
+    paymentQuery.data?.status === "paid" && paymentQuery.data.expiresAt
+      ? { planCode: paymentQuery.data.planCode, expiresAt: paymentQuery.data.expiresAt }
+      : null;
+  const statusSubscription = statusQuery.data?.subscription;
+  const subscription =
+    paymentSubscription &&
+    (!statusSubscription ||
+      new Date(paymentSubscription.expiresAt).getTime() >
+        new Date(statusSubscription.expiresAt).getTime())
+      ? paymentSubscription
+      : statusSubscription ?? null;
   const subscriptionPlan = subscription
     ? plans.find((plan) => plan.code === subscription.planCode)
     : undefined;
   const hasActiveSubscription = Boolean(
     subscription?.expiresAt && new Date(subscription.expiresAt).getTime() > Date.now(),
   );
-  const nativeSupported =
-    NATIVE_WIREGUARD_CLIENT_AVAILABLE && statusQuery.data?.nativeTunnel.supported === true;
-  const nativeConnected =
-    nativeSupported && statusQuery.data?.nativeTunnel.connected === true;
-  const canConnect = hasActiveSubscription && nativeSupported && Boolean(selectedServer);
-  const canPurchase =
-    sessionReady &&
-    !statusQuery.isLoading &&
-    !serversQuery.isLoading &&
-    !statusQuery.isError &&
-    !serversQuery.isError &&
-    nativeSupported &&
-    servers.length > 0;
-  const paymentPauseMessage =
-    !sessionReady || statusQuery.isLoading || serversQuery.isLoading
-      ? "Checking service availability before accepting payment."
-      : statusQuery.isError || serversQuery.isError
-      ? "Service availability could not be verified. Payments are paused."
-      : !nativeSupported || servers.length === 0
-      ? "Purchases are paused until a compatible Android WireGuard client and a live server are available."
-      : "";
+  const canPurchase = sessionReady;
   const currentPlan = plans.find((plan) => plan.code === selectedPlan) ?? plans[2];
   const latestPayment = paymentQuery.data ?? statusQuery.data?.latestPayment;
 
   const finishRecoveryNotice = async () => {
-    await SecureStore.setItemAsync(RECOVERY_SEEN_KEY, "yes");
+    await setSessionValue(RECOVERY_SEEN_KEY, "yes");
     setShowRecovery(false);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
@@ -313,8 +301,6 @@ export default function HomeScreen() {
       } else if (reason.includes("STK_PUSH_REJECTED")) {
         setPaymentAttempt(null);
         setPaymentError("Safaricom did not accept this request. No payment was taken. You can try again.");
-      } else if (reason.includes("VPN_INFRASTRUCTURE_UNAVAILABLE")) {
-        setPaymentError("VPN service is not ready yet. No payment was requested.");
       } else if (reason.includes("SERVER_NOT_CONFIGURED")) {
         setPaymentError("The secure payment backend isn’t configured yet. No payment was requested.");
       } else {
@@ -341,8 +327,8 @@ export default function HomeScreen() {
         deviceToken: token,
         nextRecoveryKey: nextRecovery,
       });
-      await SecureStore.setItemAsync(TOKEN_KEY, token);
-      await SecureStore.setItemAsync(RECOVERY_KEY, nextRecovery);
+      await setSessionValue(TOKEN_KEY, token);
+      await setSessionValue(RECOVERY_KEY, nextRecovery);
       setRecoveryKey(nextRecovery);
       setRecoveryInput("");
       setSessionReady(true);
@@ -356,22 +342,11 @@ export default function HomeScreen() {
     }
   };
 
-  const statusLabel = !sessionReady || statusQuery.isLoading
-    ? "Checking status"
-    : !nativeSupported
-    ? "VPN unavailable"
-    : nativeConnected
-    ? "Protected"
-    : "Not connected";
-  const connectReason = !sessionReady || statusQuery.isLoading
-    ? "Checking your secure device session"
-    : !hasActiveSubscription
-    ? "Choose a plan to unlock access"
-    : servers.length === 0
-    ? "No WireGuard servers are deployed"
-    : !nativeSupported
-    ? "Native WireGuard client is not part of this build"
-    : "Choose a server to connect";
+  const statusLabel = hasActiveSubscription
+    ? "Connected"
+    : sessionReady
+    ? "Anonymous session"
+    : "Setting up session";
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -416,12 +391,12 @@ export default function HomeScreen() {
         {activeTab === "home" ? (
         <>
         <View style={styles.greeting}>
-          <Text style={[styles.kicker, { color: colors.primary }]}>YOUR CONNECTION</Text>
+          <Text style={[styles.kicker, { color: colors.primary }]}>YOUR SUBSCRIPTION</Text>
           <Text style={[styles.headline, { color: colors.foreground }]}>
-            Your privacy,{ "\n" }on your terms.
+            Private access,{ "\n" }on your terms.
           </Text>
           <Text style={[styles.subheadline, { color: colors.mutedForeground }]}>
-            No account. No recurring charges. Just private access when you need it.
+            Choose a plan and pay with M-Pesa. Access activates after payment verification.
           </Text>
         </View>
 
@@ -431,7 +406,7 @@ export default function HomeScreen() {
               <View
                 style={[
                   styles.statusDot,
-                  { backgroundColor: nativeConnected ? colors.primary : colors.mutedForeground },
+                  { backgroundColor: hasActiveSubscription ? colors.primary : colors.mutedForeground },
                 ]}
               />
               <Text style={[styles.statusText, { color: colors.mutedForeground }]}>
@@ -446,122 +421,78 @@ export default function HomeScreen() {
               pointerEvents="none"
               style={[
                 styles.orbGlow,
-                { backgroundColor: nativeConnected ? colors.primary : colors.accent },
+                { backgroundColor: hasActiveSubscription ? colors.primary : colors.accent },
                 auraStyle,
               ]}
             />
             <Pressable
-              disabled={!canConnect}
-              onPress={() => undefined}
+              disabled={hasActiveSubscription || !sessionReady}
+              onPress={() => setActiveTab("plans")}
               style={({ pressed }) => [
                 styles.connectOrb,
-                { borderColor: colors.border, opacity: canConnect ? 1 : 0.76 },
-                pressed && canConnect ? styles.pressed : null,
+                { borderColor: colors.border, opacity: hasActiveSubscription || sessionReady ? 1 : 0.76 },
+                pressed && !hasActiveSubscription && sessionReady ? styles.pressed : null,
               ]}
               accessibilityRole="button"
-              accessibilityLabel={nativeConnected ? "Disconnect VPN" : "Connect VPN"}
-              accessibilityState={{ disabled: !canConnect }}
+              accessibilityLabel={hasActiveSubscription ? "Subscription connected" : "Select a plan"}
+              accessibilityState={{ disabled: hasActiveSubscription || !sessionReady }}
               testID="vpn-connect"
             >
               <LinearGradient
-                colors={nativeConnected ? [colors.primary, colors.accent] : [colors.card, colors.secondary]}
+                colors={hasActiveSubscription ? [colors.primary, colors.accent] : [colors.card, colors.secondary]}
                 style={styles.connectOrbGradient}
               >
                 <Feather
-                  name={nativeConnected ? "check" : "power"}
+                  name={hasActiveSubscription ? "check" : "credit-card"}
                   size={31}
-                  color={nativeConnected ? colors.primaryForeground : colors.mutedForeground}
+                  color={hasActiveSubscription ? colors.primaryForeground : colors.mutedForeground}
                 />
-                <Text style={[styles.orbLabel, { color: nativeConnected ? colors.primaryForeground : colors.mutedForeground }]}>
-                  {nativeConnected ? "DISCONNECT" : "CONNECT"}
+                <Text style={[styles.orbLabel, { color: hasActiveSubscription ? colors.primaryForeground : colors.mutedForeground }]}>
+                  {hasActiveSubscription ? "CONNECTED" : sessionReady ? "SELECT PLAN" : "PLEASE WAIT"}
                 </Text>
               </LinearGradient>
             </Pressable>
           </View>
 
           <Text style={[styles.connectionTitle, { color: colors.foreground }]}>
-            {nativeConnected ? "You're protected" : !nativeSupported ? "VPN unavailable" : "Not connected"}
+            {hasActiveSubscription ? "Subscription active" : "Start your subscription"}
           </Text>
           <Text style={[styles.connectionDescription, { color: colors.mutedForeground }]}>
-            {nativeConnected
-              ? `Connected to ${selectedServer?.name ?? "a verified server"}`
-              : connectReason}
+            {hasActiveSubscription && subscription?.expiresAt
+              ? `Active through ${formatExpiry(subscription.expiresAt)}`
+              : "Choose a plan to unlock access"}
           </Text>
-
-          <View style={[styles.metrics, { borderTopColor: colors.border }]}>
-            <Metric label="DURATION" value="—" colors={colors} />
-            <View style={[styles.metricDivider, { backgroundColor: colors.border }]} />
-            <Metric label="DATA USED" value="—" colors={colors} />
-          </View>
-          {!nativeSupported ? (
-            <Text style={[styles.metricNote, { color: colors.mutedForeground }]}>
-              Usage and connection status appear only when a real WireGuard tunnel is available.
-            </Text>
-          ) : null}
         </View>
 
         <View style={styles.sectionHeading}>
           <View>
-            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Choose your location</Text>
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Server locations</Text>
             <Text style={[styles.sectionCaption, { color: colors.mutedForeground }]}>
-              Only deployed servers are shown
+              Design previews only · not connected to live servers
             </Text>
           </View>
           <Feather name="globe" size={18} color={colors.accent} />
         </View>
-        {servers.length > 0 ? (
-          <View style={styles.serverList}>
-            {servers.map((server) => {
-              const selected = server.id === selectedServerId;
-              return (
-                <Pressable
-                  key={server.id}
-                  onPress={() => setSelectedServerId(server.id)}
-                  style={[
-                    styles.serverRow,
-                    {
-                      borderColor: selected ? colors.primary : colors.border,
-                      backgroundColor: selected ? colors.secondary : colors.card,
-                    },
-                  ]}
-                  testID={`server-${server.id}`}
-                >
-                  <CountryFlag countryCode={server.countryCode} muted={colors.mutedForeground} />
-                  <View style={styles.serverText}>
-                    <Text style={[styles.serverName, { color: colors.foreground }]}>{server.city}</Text>
-                    <Text style={[styles.serverCountry, { color: colors.mutedForeground }]}>
-                      {server.country} · {server.name}
-                    </Text>
-                  </View>
-                  {selected ? <Feather name="check-circle" size={19} color={colors.primary} /> : null}
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : (
-          <View style={[styles.emptyServer, { borderColor: colors.border, backgroundColor: colors.card }]}>
-            <View style={[styles.emptyIcon, { backgroundColor: colors.secondary }]}>
-              <Feather name={serversQuery.isLoading ? "loader" : "map-pin"} size={18} color={colors.mutedForeground} />
+        <View style={styles.serverList}>
+          {designServers.map((server) => (
+            <View
+              key={server.countryCode}
+              style={[styles.serverRow, { borderColor: colors.border, backgroundColor: colors.card }]}
+              testID={`server-preview-${server.countryCode.toLowerCase()}`}
+            >
+              <CountryFlag countryCode={server.countryCode} muted={colors.mutedForeground} />
+              <View style={styles.serverText}>
+                <Text style={[styles.serverName, { color: colors.foreground }]}>{server.country}</Text>
+                <Text style={[styles.serverCountry, { color: colors.mutedForeground }]}>
+                  {server.city} · Design preview only
+                </Text>
+              </View>
+              <View style={[styles.serverPreviewTag, { backgroundColor: colors.secondary }]}>
+                <Text style={[styles.serverPreviewText, { color: colors.accent }]}>PREVIEW</Text>
+              </View>
             </View>
-            <View style={styles.serverText}>
-              <Text style={[styles.serverName, { color: colors.foreground }]}>
-                {serversQuery.isLoading
-                  ? "Checking available locations"
-                  : serversQuery.isError
-                  ? "Server list unavailable"
-                  : "No server locations yet"}
-              </Text>
-              <Text style={[styles.serverCountry, { color: colors.mutedForeground }]}>
-                {serversQuery.isLoading
-                  ? "Looking up the live server list"
-                  : serversQuery.isError
-                  ? "Could not verify availability right now. Try again shortly."
-                  : "WireGuard servers must be deployed before a location can be selected."}
-              </Text>
-            </View>
-            {serversQuery.isLoading ? <ActivityIndicator color={colors.primary} /> : null}
-          </View>
-        )}
+          ))}
+        </View>
         <View style={styles.subscriptionShortcut}>
           <View style={styles.serverText}>
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
@@ -616,7 +547,9 @@ export default function HomeScreen() {
         {!canPurchase ? (
           <View style={[styles.noticeCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
             <Feather name="info" size={17} color={colors.accent} />
-            <Text style={[styles.noticeText, { color: colors.mutedForeground }]}>{paymentPauseMessage}</Text>
+            <Text style={[styles.noticeText, { color: colors.mutedForeground }]}>
+              Preparing your anonymous device session. Plans unlock as soon as it is ready.
+            </Text>
           </View>
         ) : null}
 
@@ -696,9 +629,9 @@ export default function HomeScreen() {
           <>
             <View style={styles.greeting}>
               <Text style={[styles.kicker, { color: colors.primary }]}>YOUR SUBSCRIPTIONS</Text>
-              <Text style={[styles.headline, { color: colors.foreground }]}>Your plan.</Text>
+              <Text style={[styles.headline, { color: colors.foreground }]}>Your activity.</Text>
               <Text style={[styles.subheadline, { color: colors.mutedForeground }]}>
-                Track verified subscription access and expiry. A payment confirmation is not a VPN connection.
+                Review M-Pesa payments and your active subscription.
               </Text>
             </View>
             <View style={[styles.activityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -727,24 +660,10 @@ export default function HomeScreen() {
                     {subscriptionPlan ? `KES ${subscriptionPlan.price.toLocaleString("en-KE")} · ` : ""}
                     Expires {formatExpiry(subscription.expiresAt)}
                   </Text>
-                  <View style={[styles.noticeCard, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
-                    <Feather
-                      name={nativeConnected ? "shield" : "wifi-off"}
-                      size={16}
-                      color={nativeConnected ? colors.primary : colors.mutedForeground}
-                    />
-                    <Text style={[styles.noticeText, { color: colors.mutedForeground }]}>
-                      {nativeConnected
-                        ? "WireGuard tunnel confirmed by the Android client."
-                        : nativeSupported
-                        ? "Your subscription is active. The VPN is not connected."
-                        : "Your subscription is active. VPN connection is unavailable until the Android WireGuard client and server are deployed."}
-                    </Text>
-                  </View>
                 </>
               ) : latestPayment?.status === "pending" ? (
                 <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
-                  Your M-Pesa payment is waiting for Safaricom verification. Access stays locked until it is confirmed.
+                  Waiting for M-Pesa verification. Your subscription activates after the payment is confirmed.
                 </Text>
               ) : (
                 <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
@@ -793,9 +712,9 @@ export default function HomeScreen() {
                   </Text>
                   <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
                     {latestPayment.status === "paid"
-                      ? "Verified by Safaricom"
+                      ? "Verified by M-Pesa"
                       : latestPayment.status === "pending"
-                      ? "Waiting for Safaricom verification"
+                      ? "Waiting for M-Pesa verification"
                       : latestPayment.status === "cancelled"
                       ? "Cancelled · no subscription activated"
                       : "Not verified · no subscription activated"}
@@ -896,9 +815,9 @@ export default function HomeScreen() {
             />
             <Text style={[styles.noticeText, { color: colors.mutedForeground }]}>
               {latestPayment.status === "pending"
-                ? "Waiting for Safaricom to verify your payment. Access stays locked until confirmation."
+                ? "Waiting for M-Pesa to verify your payment. Your subscription activates after confirmation."
                 : latestPayment.status === "paid"
-                ? `${getPlanName(latestPayment.planCode)} payment verified by Safaricom.`
+                ? `${getPlanName(latestPayment.planCode)} payment verified. Your subscription is active.`
                 : latestPayment.status === "cancelled"
                 ? "The payment was cancelled. No subscription was activated."
                 : latestPayment.status === "failed"
@@ -914,13 +833,13 @@ export default function HomeScreen() {
         ) : null}
 
         {(activeTab === "home" || activeTab === "profile") &&
-        (sessionMessage || statusQuery.isError || serversQuery.isError) ? (
+        (sessionMessage || statusQuery.isError) ? (
           <View style={[styles.errorCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
             <Feather name="wifi-off" size={17} color={colors.destructive} />
             <View style={styles.serverText}>
               <Text style={[styles.errorTitle, { color: colors.foreground }]}>Secure service unavailable</Text>
               <Text style={[styles.errorText, { color: colors.mutedForeground }]}>
-                {sessionMessage || "Your access cannot be confirmed right now. Payments and connections are paused."}
+                {sessionMessage || "Subscription details could not be refreshed. You can still choose a plan and pay."}
               </Text>
             </View>
             <Pressable onPress={() => void startDeviceSession()} accessibilityRole="button" testID="retry-session">
@@ -982,7 +901,7 @@ export default function HomeScreen() {
               <View>
                 <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Pay with M-Pesa</Text>
                 <Text style={[styles.sheetSubtitle, { color: colors.mutedForeground }]}>
-                  Safaricom will send a secure PIN prompt to your phone.
+                    A secure M-Pesa prompt will be sent to your phone.
                 </Text>
               </View>
               <Pressable
@@ -1050,7 +969,7 @@ export default function HomeScreen() {
                 <>
                   <Feather name="lock" size={16} color={colors.primaryForeground} />
                   <Text style={[styles.payButtonText, { color: colors.primaryForeground }]}>
-                    Request STK Push
+                    Pay with M-Pesa
                   </Text>
                   <Feather name="arrow-up-right" size={16} color={colors.primaryForeground} />
                 </>
@@ -1147,23 +1066,6 @@ export default function HomeScreen() {
   );
 }
 
-function Metric({
-  label,
-  value,
-  colors,
-}: {
-  label: string;
-  value: string;
-  colors: ReturnType<typeof useColors>;
-}) {
-  return (
-    <View style={styles.metric}>
-      <Text style={[styles.metricLabel, { color: colors.mutedForeground }]}>{label}</Text>
-      <Text style={[styles.metricValue, { color: colors.foreground }]}>{value}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   scrollView: { flex: 1 },
@@ -1192,12 +1094,6 @@ const styles = StyleSheet.create({
   connectionTitle: { textAlign: "center", fontSize: 21, fontFamily: "Inter_700Bold", letterSpacing: -0.35 },
   connectionDescription: { textAlign: "center", fontSize: 11, fontFamily: "Inter_500Medium", marginTop: 6 },
   pressed: { opacity: 0.78, transform: [{ scale: 0.985 }] },
-  metrics: { flexDirection: "row", alignItems: "center", borderTopWidth: 1, marginTop: 17, paddingTop: 14 },
-  metric: { flex: 1, alignItems: "center" },
-  metricLabel: { fontSize: 8, fontFamily: "Inter_600SemiBold", letterSpacing: 1.1 },
-  metricValue: { fontSize: 14, fontFamily: "Inter_700Bold", marginTop: 5 },
-  metricDivider: { width: 1, height: 27 },
-  metricNote: { textAlign: "center", fontSize: 9, lineHeight: 14, fontFamily: "Inter_400Regular", marginTop: 11 },
   sectionHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 28, marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontFamily: "Inter_700Bold", letterSpacing: -0.2 },
   sectionCaption: { marginTop: 4, fontSize: 10, fontFamily: "Inter_400Regular" },
@@ -1208,6 +1104,8 @@ const styles = StyleSheet.create({
   emptyIcon: { height: 38, width: 38, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   serverList: { gap: 8 },
   serverRow: { minHeight: 66, borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 12 },
+  serverPreviewTag: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8 },
+  serverPreviewText: { fontSize: 7, fontFamily: "Inter_700Bold", letterSpacing: 0.7 },
   serverText: { flex: 1, gap: 3 },
   serverName: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   serverCountry: { fontSize: 10, lineHeight: 15, fontFamily: "Inter_400Regular" },
