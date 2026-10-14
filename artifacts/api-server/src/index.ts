@@ -1,5 +1,5 @@
 import app from "./app.js";
-import { logger } from "./lib/logger";
+import { logger } from "./lib/logger.js";
 
 export default app;
 
