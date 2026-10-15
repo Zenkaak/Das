@@ -14,4 +14,5 @@ export interface PaymentResponse {
   amountKes: number;
   expiresAt?: Date | null;
   message?: string | null;
+  resultCode?: number | null;
 }

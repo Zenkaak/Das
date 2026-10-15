@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ActivityList,
   ConnectRequest,
   ConnectResponse,
   CreatePaymentRequest,
@@ -28,6 +29,7 @@ import type {
   ErrorResponse,
   HealthStatus,
   PaymentResponse,
+  PlanList,
   RecoverSessionRequest,
   ServerList,
   SessionResponse,
@@ -226,6 +228,83 @@ export const useCreateVpnSession = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getCreateVpnSessionMutationOptions(options));
     }
+
+export const getGetVpnPlansUrl = () => {
+
+
+
+
+  return `/api/vpn/plans`
+}
+
+/**
+ * @summary List the current subscription package catalog
+ */
+export const getVpnPlans = async ( options?: Parameters<typeof customFetch>[1]): Promise<PlanList> => {
+
+  return customFetch<PlanList>(getGetVpnPlansUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetVpnPlansQueryKey = () => {
+    return [
+    `/api/vpn/plans`
+    ] as const;
+    }
+
+
+export const getGetVpnPlansQueryOptions = <TData = Awaited<ReturnType<typeof getVpnPlans>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVpnPlans>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVpnPlansQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getVpnPlans>>> = ({ signal }) => getVpnPlans({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getVpnPlans>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetVpnPlansQueryResult = NonNullable<Awaited<ReturnType<typeof getVpnPlans>>>
+export type GetVpnPlansQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the current subscription package catalog
+ */
+
+export function useGetVpnPlans<TData = Awaited<ReturnType<typeof getVpnPlans>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVpnPlans>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetVpnPlansQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getRecoverVpnSessionUrl = () => {
 
@@ -457,6 +536,83 @@ export function useGetVpnServers<TData = Awaited<ReturnType<typeof getVpnServers
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetVpnServersQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetVpnActivityUrl = () => {
+
+
+
+
+  return `/api/vpn/activity`
+}
+
+/**
+ * @summary List payments and subscription events for this device
+ */
+export const getVpnActivity = async ( options?: Parameters<typeof customFetch>[1]): Promise<ActivityList> => {
+
+  return customFetch<ActivityList>(getGetVpnActivityUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetVpnActivityQueryKey = () => {
+    return [
+    `/api/vpn/activity`
+    ] as const;
+    }
+
+
+export const getGetVpnActivityQueryOptions = <TData = Awaited<ReturnType<typeof getVpnActivity>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVpnActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVpnActivityQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getVpnActivity>>> = ({ signal }) => getVpnActivity({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getVpnActivity>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetVpnActivityQueryResult = NonNullable<Awaited<ReturnType<typeof getVpnActivity>>>
+export type GetVpnActivityQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary List payments and subscription events for this device
+ */
+
+export function useGetVpnActivity<TData = Awaited<ReturnType<typeof getVpnActivity>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVpnActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetVpnActivityQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

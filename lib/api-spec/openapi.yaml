@@ -46,6 +46,18 @@ paths:
                 $ref: "#/components/schemas/SessionResponse"
         "400":
           $ref: "#/components/responses/Error"
+  /vpn/plans:
+    get:
+      operationId: getVpnPlans
+      tags: [vpn]
+      summary: List the current subscription package catalog
+      responses:
+        "200":
+          description: Current packages and prices
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanList"
   /vpn/recovery:
     post:
       operationId: recoverVpnSession
@@ -96,6 +108,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ServerList"
+  /vpn/activity:
+    get:
+      operationId: getVpnActivity
+      tags: [vpn]
+      summary: List payments and subscription events for this device
+      security:
+        - deviceSession: []
+      responses:
+        "200":
+          description: Actual payment and subscription history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityList"
+        "401":
+          $ref: "#/components/responses/Error"
   /vpn/payments:
     post:
       operationId: createVpnPayment
@@ -315,12 +343,68 @@ components:
           items:
             $ref: "#/components/schemas/Server"
       required: [servers]
+    Plan:
+      type: object
+      properties:
+        code:
+          type: string
+        label:
+          type: string
+        amountKes:
+          type: integer
+        durationDays:
+          type: integer
+        badge:
+          type: string
+          nullable: true
+      required: [code, label, amountKes, durationDays]
+    PlanList:
+      type: object
+      properties:
+        plans:
+          type: array
+          items:
+            $ref: "#/components/schemas/Plan"
+      required: [plans]
+    ActivityItem:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [payment, activation, expiry]
+        status:
+          type: string
+          enum: [pending, paid, failed, cancelled, expired, active, upcoming]
+        planCode:
+          type: string
+        planLabel:
+          type: string
+        amountKes:
+          type: integer
+        occurredAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, type, status, planCode, planLabel, amountKes, occurredAt]
+    ActivityList:
+      type: object
+      properties:
+        activities:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityItem"
+      required: [activities]
     CreatePaymentRequest:
       type: object
       properties:
         planCode:
           type: string
-          enum: [three_days, weekly, monthly, three_months, yearly]
+          enum: [one_day, three_days, weekly, fourteen_days, monthly, two_months, three_months, six_months, nine_months, yearly]
         phoneNumber:
           type: string
           minLength: 10
@@ -345,6 +429,9 @@ components:
           nullable: true
         message:
           type: string
+          nullable: true
+        resultCode:
+          type: integer
           nullable: true
       required: [id, status, planCode, amountKes]
     ConnectRequest:

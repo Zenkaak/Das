@@ -57,8 +57,10 @@ function proxyToSupabase(functionName: string, method: Method) {
 
 router.post("/vpn/session", proxyToSupabase("device-session", "POST"));
 router.post("/vpn/recovery", proxyToSupabase("recover-session", "POST"));
+router.get("/vpn/plans", proxyToSupabase("vpn-plans", "GET"));
 router.get("/vpn/status", proxyToSupabase("vpn-status", "GET"));
 router.get("/vpn/servers", proxyToSupabase("vpn-servers", "GET"));
+router.get("/vpn/activity", proxyToSupabase("vpn-activity", "GET"));
 router.post("/vpn/payments", proxyToSupabase("mpesa-initiate", "POST"));
 router.get("/vpn/payments/:paymentId", proxyToSupabase("mpesa-payment-status", "GET"));
 router.post("/vpn/connect", proxyToSupabase("vpn-connect", "POST"));

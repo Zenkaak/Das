@@ -4,10 +4,16 @@ verify_jwt = false
 [functions.recover-session]
 verify_jwt = false
 
+[functions.vpn-plans]
+verify_jwt = false
+
 [functions.vpn-status]
 verify_jwt = false
 
 [functions.vpn-servers]
+verify_jwt = false
+
+[functions.vpn-activity]
 verify_jwt = false
 
 [functions.mpesa-initiate]

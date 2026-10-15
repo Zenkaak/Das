@@ -40,6 +40,20 @@ export const CreateVpnSessionResponse = zod.object({
 
 
 /**
+ * @summary List the current subscription package catalog
+ */
+export const GetVpnPlansResponse = zod.object({
+  "plans": zod.array(zod.object({
+  "code": zod.string(),
+  "label": zod.string(),
+  "amountKes": zod.number().int(),
+  "durationDays": zod.number().int(),
+  "badge": zod.string().nullish()
+}))
+})
+
+
+/**
  * @summary Recover and rotate an anonymous device session
  */
 export const recoverVpnSessionBodyRecoveryKeyMin = 64;
@@ -101,6 +115,23 @@ export const GetVpnServersResponse = zod.object({
 
 
 /**
+ * @summary List payments and subscription events for this device
+ */
+export const GetVpnActivityResponse = zod.object({
+  "activities": zod.array(zod.object({
+  "id": zod.string(),
+  "type": zod.enum(['payment', 'activation', 'expiry']),
+  "status": zod.enum(['pending', 'paid', 'failed', 'cancelled', 'expired', 'active', 'upcoming']),
+  "planCode": zod.string(),
+  "planLabel": zod.string(),
+  "amountKes": zod.number().int(),
+  "occurredAt": zod.coerce.date(),
+  "expiresAt": zod.coerce.date().nullish()
+}))
+})
+
+
+/**
  * @summary Request an M-Pesa STK Push for a fixed subscription plan
  */
 export const createVpnPaymentHeaderIdempotencyKeyMin = 16;
@@ -118,7 +149,7 @@ export const createVpnPaymentBodyPhoneNumberMax = 13;
 
 
 export const CreateVpnPaymentBody = zod.object({
-  "planCode": zod.enum(['three_days', 'weekly', 'monthly', 'three_months', 'yearly']),
+  "planCode": zod.enum(['one_day', 'three_days', 'weekly', 'fourteen_days', 'monthly', 'two_months', 'three_months', 'six_months', 'nine_months', 'yearly']),
   "phoneNumber": zod.string().min(createVpnPaymentBodyPhoneNumberMin).max(createVpnPaymentBodyPhoneNumberMax)
 })
 
@@ -128,7 +159,8 @@ export const CreateVpnPaymentResponse = zod.object({
   "planCode": zod.string(),
   "amountKes": zod.number().int(),
   "expiresAt": zod.coerce.date().nullish(),
-  "message": zod.string().nullish()
+  "message": zod.string().nullish(),
+  "resultCode": zod.number().int().nullish()
 })
 
 
@@ -145,7 +177,8 @@ export const GetVpnPaymentResponse = zod.object({
   "planCode": zod.string(),
   "amountKes": zod.number().int(),
   "expiresAt": zod.coerce.date().nullish(),
-  "message": zod.string().nullish()
+  "message": zod.string().nullish(),
+  "resultCode": zod.number().int().nullish()
 })
 
 

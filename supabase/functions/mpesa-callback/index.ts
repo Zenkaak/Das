@@ -1,5 +1,4 @@
 import {
-  constantTimeEqual,
   database,
   json,
   preflight,
@@ -50,31 +49,36 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const givenKey = new URL(request.url).searchParams.get("key") ?? "";
-    const callbackKey = requiredEnv("MPESA_CALLBACK_TOKEN");
-    if (!constantTimeEqual(givenKey, callbackKey)) {
-      return json({ error: "Not found" }, 404);
-    }
-
     const payload = await request.json();
     const callback = payload?.Body?.stkCallback;
     const checkoutId = callback?.CheckoutRequestID;
     const merchantId = callback?.MerchantRequestID;
-    if (typeof checkoutId !== "string" || typeof merchantId !== "string") {
-      return json({ ResultCode: 0, ResultDesc: "Accepted" }, 200);
+    if (typeof checkoutId !== "string" || typeof merchantId !== "string" ||
+        !Number.isInteger(Number(callback?.ResultCode))) {
+      return json({ ResultCode: 1, ResultDesc: "Invalid callback payload" }, 400);
     }
 
     const rows = await database<Array<{
-      id: string; amount_kes: number; status: string; merchant_request_id: string | null;
+      id: string;
+      amount_kes: number;
+      status: string;
+      merchant_request_id: string | null;
+      phone_number: string | null;
     }>>(
-      `das_vpn_payments?checkout_request_id=eq.${encodeURIComponent(checkoutId)}&select=id,amount_kes,status,merchant_request_id&limit=1`,
+      `das_vpn_payments?checkout_request_id=eq.${encodeURIComponent(checkoutId)}&select=id,amount_kes,status,merchant_request_id,phone_number&limit=1`,
     );
     const payment = rows[0];
-    if (!payment || payment.merchant_request_id !== merchantId) {
-      return json({ ResultCode: 0, ResultDesc: "Accepted" }, 200);
+    if (!payment) {
+      return json({ ResultCode: 1, ResultDesc: "Payment request not found; retry callback" }, 503);
+    }
+    if (payment.merchant_request_id !== merchantId) {
+      return json({ ResultCode: 1, ResultDesc: "Payment request mismatch" }, 404);
     }
     if (payment.status === "paid") {
       return json({ ResultCode: 0, ResultDesc: "Already processed" }, 200);
+    }
+    if (payment.status !== "pending") {
+      return json({ ResultCode: 0, ResultDesc: "Payment already closed" }, 200);
     }
 
     const { host, token } = await darajaToken();
@@ -104,20 +108,30 @@ Deno.serve(async (request) => {
     });
     const verified = await verification.json().catch(() => ({}));
     if (!verification.ok || String(verified.ResponseCode) !== "0" ||
-        verified.ResultCode === undefined) {
-      return json({ ResultCode: 0, ResultDesc: "Payment verification pending" }, 202);
+        verified.ResultCode === undefined ||
+        (verified.CheckoutRequestID !== undefined && verified.CheckoutRequestID !== checkoutId) ||
+        (verified.MerchantRequestID !== undefined && verified.MerchantRequestID !== merchantId)) {
+      return json({ ResultCode: 1, ResultDesc: "Payment verification unavailable; retry callback" }, 503);
     }
 
     const verifiedCode = Number(verified.ResultCode);
     const callbackCode = Number(callback.ResultCode);
     if (verifiedCode !== 0 || callbackCode !== 0) {
+      const finalCode = callbackCode !== 0 ? callbackCode : verifiedCode;
+      const cancelledCodes = new Set([1032, 4001]);
+      const expiredCodes = new Set([1037]);
       await database(
         `das_vpn_payments?id=eq.${payment.id}&status=eq.pending`,
         {
           method: "PATCH",
           body: {
-            status: verifiedCode === 1032 ? "cancelled" : "failed",
-            result_code: verifiedCode,
+            status: cancelledCodes.has(finalCode)
+              ? "cancelled"
+              : expiredCodes.has(finalCode)
+              ? "expired"
+              : "failed",
+            result_code: finalCode,
+            result_description: String(callbackCode !== 0 ? callback.ResultDesc ?? "" : verified.ResultDesc ?? "").slice(0, 300),
             updated_at: new Date().toISOString(),
           },
           prefer: "return=minimal",
@@ -132,8 +146,11 @@ Deno.serve(async (request) => {
     const amount = Number(itemValue(items, "Amount"));
     const receipt = itemValue(items, "MpesaReceiptNumber");
     const date = transactionTime(itemValue(items, "TransactionDate"));
-    if (amount !== payment.amount_kes || typeof receipt !== "string" || !date) {
-      return json({ ResultCode: 0, ResultDesc: "Payment verification pending" }, 202);
+    const payerPhone = String(itemValue(items, "PhoneNumber") ?? "");
+    if (amount !== payment.amount_kes || typeof receipt !== "string" ||
+        !/^[A-Z0-9]{8,20}$/.test(receipt) || !date ||
+        !payment.phone_number || payerPhone !== payment.phone_number) {
+      return json({ ResultCode: 1, ResultDesc: "Payment details do not match; retry callback" }, 503);
     }
 
     await rpc("das_vpn_activate_verified_payment", {

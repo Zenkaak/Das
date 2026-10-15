@@ -6,6 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './activityItem';
+export * from './activityItemStatus';
+export * from './activityItemType';
+export * from './activityList';
 export * from './apiError';
 export * from './connectRequest';
 export * from './connectResponse';
@@ -17,6 +21,8 @@ export * from './errorResponse';
 export * from './healthStatus';
 export * from './paymentResponse';
 export * from './paymentResponseStatus';
+export * from './plan';
+export * from './planList';
 export * from './recoverSessionRequest';
 export * from './server';
 export * from './serverList';

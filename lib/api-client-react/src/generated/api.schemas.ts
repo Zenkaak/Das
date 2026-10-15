@@ -96,14 +96,68 @@ export interface ServerList {
   servers: Server[];
 }
 
+export interface Plan {
+  code: string;
+  label: string;
+  amountKes: number;
+  durationDays: number;
+  badge?: string | null;
+}
+
+export interface PlanList {
+  plans: Plan[];
+}
+
+export type ActivityItemType = typeof ActivityItemType[keyof typeof ActivityItemType];
+
+
+export const ActivityItemType = {
+  payment: 'payment',
+  activation: 'activation',
+  expiry: 'expiry',
+} as const;
+
+export type ActivityItemStatus = typeof ActivityItemStatus[keyof typeof ActivityItemStatus];
+
+
+export const ActivityItemStatus = {
+  pending: 'pending',
+  paid: 'paid',
+  failed: 'failed',
+  cancelled: 'cancelled',
+  expired: 'expired',
+  active: 'active',
+  upcoming: 'upcoming',
+} as const;
+
+export interface ActivityItem {
+  id: string;
+  type: ActivityItemType;
+  status: ActivityItemStatus;
+  planCode: string;
+  planLabel: string;
+  amountKes: number;
+  occurredAt: string;
+  expiresAt?: string | null;
+}
+
+export interface ActivityList {
+  activities: ActivityItem[];
+}
+
 export type CreatePaymentRequestPlanCode = typeof CreatePaymentRequestPlanCode[keyof typeof CreatePaymentRequestPlanCode];
 
 
 export const CreatePaymentRequestPlanCode = {
+  one_day: 'one_day',
   three_days: 'three_days',
   weekly: 'weekly',
+  fourteen_days: 'fourteen_days',
   monthly: 'monthly',
+  two_months: 'two_months',
   three_months: 'three_months',
+  six_months: 'six_months',
+  nine_months: 'nine_months',
   yearly: 'yearly',
 } as const;
 
@@ -134,6 +188,7 @@ export interface PaymentResponse {
   amountKes: number;
   expiresAt?: string | null;
   message?: string | null;
+  resultCode?: number | null;
 }
 
 export interface ConnectRequest {

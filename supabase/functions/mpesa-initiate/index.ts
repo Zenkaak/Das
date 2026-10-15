@@ -8,8 +8,6 @@ import {
   safeError,
 } from "../_shared/core.ts";
 
-const planCodes = new Set(["three_days", "weekly", "monthly", "three_months", "yearly"]);
-
 function normalizeKenyanPhone(input: string): string | null {
   const digits = input.replace(/[^\d]/g, "");
   if (/^(?:254[17]\d{8})$/.test(digits)) return digits;
@@ -69,7 +67,7 @@ Deno.serve(async (request) => {
     const phoneNumber = typeof body.phoneNumber === "string" ? body.phoneNumber : "";
     const phone = normalizeKenyanPhone(phoneNumber);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
-    if (!planCodes.has(planCode) || !phone || !/^[A-Za-z0-9_-]{16,100}$/.test(idempotencyKey)) {
+    if (!/^[a-z0-9_-]{1,50}$/.test(planCode) || !phone || !/^[A-Za-z0-9_-]{16,100}$/.test(idempotencyKey)) {
       return json({ error: "Choose a plan and enter a valid Kenyan M-Pesa number", code: "INVALID_PAYMENT_REQUEST" }, 400);
     }
 
@@ -115,6 +113,13 @@ Deno.serve(async (request) => {
     const plan = plans[0];
     if (!plan) return json({ error: "Subscription plan is unavailable", code: "PLAN_UNAVAILABLE" }, 404);
 
+    const shortcode = requiredEnv("MPESA_SHORTCODE");
+    const partyB = requiredEnv("MPESA_PARTY_B");
+    const passkey = requiredEnv("MPESA_PASSKEY");
+    const callbackUrl = `${requiredEnv("SUPABASE_URL").replace(/\/+$/, "")}/functions/v1/mpesa-callback`;
+    const timestamp = darajaTimestamp();
+    const password = btoa(`${shortcode}${passkey}${timestamp}`);
+    const token = await oauthToken();
     const payments = await database<Array<{ id: string }>>(
       "das_vpn_payments",
       {
@@ -123,6 +128,7 @@ Deno.serve(async (request) => {
           session_id: session.id,
           plan_code: plan.code,
           amount_kes: plan.amount_kes,
+          phone_number: phone,
           idempotency_key: idempotencyKey,
         },
         prefer: "return=representation",
@@ -131,18 +137,13 @@ Deno.serve(async (request) => {
     const payment = payments[0];
     if (!payment) throw new Error("payment_insert_failed");
 
-    const shortcode = requiredEnv("MPESA_SHORTCODE");
-    const partyB = requiredEnv("MPESA_PARTY_B");
-    const passkey = requiredEnv("MPESA_PASSKEY");
-    const timestamp = darajaTimestamp();
-    const password = btoa(`${shortcode}${passkey}${timestamp}`);
-    const token = await oauthToken();
     const environment = requiredEnv("DARAJA_ENVIRONMENT");
     const host = environment === "sandbox"
       ? "https://sandbox.safaricom.co.ke"
-      : "https://api.safaricom.co.ke";
-    const callbackSecret = requiredEnv("MPESA_CALLBACK_TOKEN");
-    const callbackUrl = `${requiredEnv("SUPABASE_URL").replace(/\/+$/, "")}/functions/v1/mpesa-callback?key=${encodeURIComponent(callbackSecret)}`;
+      : environment === "production"
+      ? "https://api.safaricom.co.ke"
+      : "";
+    if (!host) throw new Error("missing_DARAJA_ENVIRONMENT");
 
     const response = await fetch(`${host}/mpesa/stkpush/v1/processrequest`, {
       method: "POST",
@@ -168,12 +169,24 @@ Deno.serve(async (request) => {
     if (!response.ok || String(result.ResponseCode) !== "0" ||
         typeof result.CheckoutRequestID !== "string" ||
         typeof result.MerchantRequestID !== "string") {
+      const responseCode = Number(result.ResponseCode);
       await database(`das_vpn_payments?id=eq.${payment.id}&status=eq.pending`, {
         method: "PATCH",
-        body: { status: "failed", updated_at: new Date().toISOString() },
+        body: {
+          status: "failed",
+          result_code: Number.isInteger(responseCode) ? responseCode : null,
+          result_description: typeof result.ResponseDescription === "string"
+            ? result.ResponseDescription.slice(0, 300)
+            : null,
+          updated_at: new Date().toISOString(),
+        },
         prefer: "return=minimal",
       });
-      return json({ error: "Safaricom did not accept the payment request", code: "STK_PUSH_REJECTED" }, 502);
+      return json({
+        error: "Safaricom did not accept the payment request",
+        code: "STK_PUSH_REJECTED",
+        resultCode: Number.isInteger(responseCode) ? responseCode : null,
+      }, 502);
     }
 
     await database(`das_vpn_payments?id=eq.${payment.id}`, {

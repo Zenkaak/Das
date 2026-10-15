@@ -10,9 +10,14 @@ export type CreatePaymentRequestPlanCode = typeof CreatePaymentRequestPlanCode[k
 
 
 export const CreatePaymentRequestPlanCode = {
+  one_day: 'one_day',
   three_days: 'three_days',
   weekly: 'weekly',
+  fourteen_days: 'fourteen_days',
   monthly: 'monthly',
+  two_months: 'two_months',
   three_months: 'three_months',
+  six_months: 'six_months',
+  nine_months: 'nine_months',
   yearly: 'yearly',
 } as const;
