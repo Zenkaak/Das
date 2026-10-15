@@ -132,6 +132,7 @@ Deno.serve(async (request) => {
     if (!payment) throw new Error("payment_insert_failed");
 
     const shortcode = requiredEnv("MPESA_SHORTCODE");
+    const partyB = requiredEnv("MPESA_PARTY_B");
     const passkey = requiredEnv("MPESA_PASSKEY");
     const timestamp = darajaTimestamp();
     const password = btoa(`${shortcode}${passkey}${timestamp}`);
@@ -156,7 +157,7 @@ Deno.serve(async (request) => {
         TransactionType: "CustomerBuyGoodsOnline",
         Amount: plan.amount_kes,
         PartyA: phone,
-        PartyB: shortcode,
+        PartyB: partyB,
         PhoneNumber: phone,
         CallBackURL: callbackUrl,
         AccountReference: "DAS VPN",
