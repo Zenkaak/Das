@@ -291,7 +291,8 @@ export default function HomeScreen() {
       );
       setPaymentAttempt(null);
       setPaymentId(payment.id);
-      setPaymentNotice(payment.message ?? "Check your phone for the M-Pesa prompt.");
+      setPaymentNotice(payment.message ?? "Request accepted. Check your phone for the M-Pesa prompt.");
+      setActiveTab("subscriptions");
       setPaymentOpen(false);
       setPaymentPhone("");
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -785,6 +786,8 @@ export default function HomeScreen() {
                       : "Not verified · no subscription activated"}
                   </Text>
                 </>
+              ) : paymentNotice ? (
+                <Text style={[styles.activityText, { color: colors.mutedForeground }]}>{paymentNotice}</Text>
               ) : (
                 <Text style={[styles.activityText, { color: colors.mutedForeground }]}>
                   No subscription payments are recorded for this device yet.
