@@ -924,7 +924,6 @@ export default function HomeScreen() {
                 { icon: "check", title: "STK Push Sent", copy: "Waiting for your M-Pesa PIN", complete: true },
                 { icon: "refresh-cw", title: "Payment Verification", copy: "Confirming with M-Pesa...", active: true },
                 { icon: "shield", title: "Activating Subscription", copy: "After verified payment" },
-                { icon: "wifi", title: "Connecting to VPN", copy: "A live server connection is not configured yet" },
               ].map((step, index) => (
                 <View key={step.title} style={styles.stepRow}>
                   <View style={[
@@ -938,7 +937,7 @@ export default function HomeScreen() {
                     <Text style={[styles.stepTitle, { color: colors.foreground }]}>{step.title}</Text>
                     <Text style={[styles.smallCopy, { color: colors.mutedForeground }]}>{step.copy}</Text>
                   </View>
-                  {index < 3 ? <View style={[styles.stepRule, { backgroundColor: colors.border }]} /> : null}
+                  {index < 2 ? <View style={[styles.stepRule, { backgroundColor: colors.border }]} /> : null}
                 </View>
               ))}
             </View>
@@ -954,7 +953,7 @@ export default function HomeScreen() {
               </View>
             ) : null}
             {paymentQuery.isError ? (
-              <InlineError message="Payment status could not be checked. It is not marked as paid." onRetry={() => void paymentQuery.refetch()} colors={colors} />
+              <InlineError message="Payment status is temporarily unavailable. We’re still checking; your subscription will update once M-Pesa confirms." onRetry={() => void paymentQuery.refetch()} colors={colors} />
             ) : null}
             <Pressable
               onPress={() => { setPaymentFlow(null); setActiveTab("activity"); }}
