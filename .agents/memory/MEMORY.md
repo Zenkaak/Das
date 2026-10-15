@@ -1,1 +1,2 @@
 - [Subscription-only product scope](subscription-scope.md) — Treat verified purchases as subscription activation; never imply a VPN tunnel is live unless it is actually connected.
+- [Vercel build source](vercel-build-source.md) — Production builds from the repository-root app; the nested `Das/` copy is not the deployment source.

@@ -4,6 +4,7 @@ import {
   AppState,
   ActivityIndicator,
   Keyboard,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -182,9 +183,13 @@ export default function HomeScreen() {
   } | null>(null);
   const [timedOut, setTimedOut] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const checkoutOpening = useRef(false);
   const paymentSubmissionLock = useRef(false);
+  const pullStartY = useRef<number | null>(null);
+  const pullDistanceRef = useRef(0);
+  const scrollOffsetY = useRef(0);
 
   const aura = useSharedValue(0.55);
   useEffect(() => {
@@ -289,6 +294,14 @@ export default function HomeScreen() {
   const hasActiveSubscription = Boolean(
     subscription?.expiresAt && new Date(subscription.expiresAt).getTime() > Date.now(),
   );
+  const subscriptionPlan = plans.find((plan) => plan.code === subscription?.planCode);
+  const featuredPlan = plans.find((plan) => plan.durationDays === 3) ?? plans[0];
+  const preferredPopularPlans = plans.filter(
+    (plan) => plan.durationDays === 7 || plan.durationDays === 30,
+  );
+  const homePopularPlans = preferredPopularPlans.length
+    ? preferredPopularPlans
+    : plans.slice(0, 2);
   const latestPayment = paymentQuery.data ?? null;
   const selectedPlanLabel = currentPlan?.label ?? "Selected plan";
   const startPaymentForPlan = (planCode: string) => {
@@ -302,6 +315,18 @@ export default function HomeScreen() {
 
   const openPayment = () => {
     if (currentPlan) startPaymentForPlan(currentPlan.code);
+  };
+
+  const openSupport = async () => {
+    const message = encodeURIComponent("Hi DAS VPN Support, I need help with my subscription.");
+    try {
+      await Linking.openURL(`https://wa.me/254180802616?text=${message}`);
+    } catch {
+      Alert.alert(
+        "Unable to open WhatsApp",
+        "Please contact DAS VPN Support at +254 180 802 616.",
+      );
+    }
   };
 
   const closePaymentFlow = () => {
@@ -319,7 +344,7 @@ export default function HomeScreen() {
       if (activeTab === "activity") jobs.push(activityQuery.refetch());
       if (paymentLookupId) jobs.push(paymentQuery.refetch());
     }
-    if (activeTab === "plans") jobs.push(plansQuery.refetch());
+    if (activeTab === "home" || activeTab === "plans") jobs.push(plansQuery.refetch());
     try {
       await Promise.allSettled(jobs);
     } finally {
@@ -504,8 +529,39 @@ export default function HomeScreen() {
           styles.content,
           { paddingTop: contentTop, paddingBottom: contentBottom },
         ]}
+        alwaysBounceVertical
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={16}
+        onScroll={(event) => {
+          scrollOffsetY.current = event.nativeEvent.contentOffset.y;
+        }}
+        onTouchStart={(event) => {
+          if (Platform.OS !== "web" || refreshing || scrollOffsetY.current > 1) return;
+          const touch = event.nativeEvent.touches[0];
+          pullStartY.current = touch?.pageY ?? null;
+        }}
+        onTouchMove={(event) => {
+          if (Platform.OS !== "web" || pullStartY.current === null || scrollOffsetY.current > 1) return;
+          const touch = event.nativeEvent.touches[0];
+          if (!touch) return;
+          const distance = Math.max(0, touch.pageY - pullStartY.current);
+          pullDistanceRef.current = distance;
+          setPullDistance(Math.min(distance, 80));
+          if (distance > 8) event.preventDefault();
+        }}
+        onTouchEnd={() => {
+          const shouldRefresh = Platform.OS === "web" && pullDistanceRef.current >= 64;
+          pullStartY.current = null;
+          pullDistanceRef.current = 0;
+          setPullDistance(0);
+          if (shouldRefresh) void refreshVisibleData();
+        }}
+        onTouchCancel={() => {
+          pullStartY.current = null;
+          pullDistanceRef.current = 0;
+          setPullDistance(0);
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -516,6 +572,19 @@ export default function HomeScreen() {
           />
         }
       >
+        {Platform.OS === "web" && (pullDistance > 8 || refreshing) ? (
+          <View
+            style={[
+              styles.webRefreshIndicator,
+              { height: refreshing ? 40 : Math.min(44, pullDistance * 0.6) },
+            ]}
+          >
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={[styles.smallCopy, { color: colors.mutedForeground }]}>
+              {refreshing ? "Refreshing…" : pullDistance >= 64 ? "Release to refresh" : "Pull to refresh"}
+            </Text>
+          </View>
+        ) : null}
         <View style={[styles.header, compactHeader ? styles.compactHeader : null]}>
           {showHeaderBack ? (
             <Pressable
@@ -577,139 +646,242 @@ export default function HomeScreen() {
 
         {!paymentFlow && activeTab === "home" ? (
           <>
+            <View style={styles.homeHeroIntro}>
+              <Text style={[styles.homeHeadline, { color: colors.foreground }]}>
+                Your internet,{"\n"}
+                <Text style={{ color: colors.accent }}>without limits</Text>
+              </Text>
+              <View
+                style={[
+                  styles.homeStatusPill,
+                  {
+                    backgroundColor: hasActiveSubscription ? colors.successSurface : colors.badgeSurface,
+                    borderColor: hasActiveSubscription ? colors.successBorder : colors.border,
+                  },
+                ]}
+              >
+                <Feather
+                  name={hasActiveSubscription ? "check-circle" : "shield"}
+                  size={14}
+                  color={hasActiveSubscription ? colors.success : colors.accent}
+                />
+                <Text
+                  style={[
+                    styles.homeStatusPillText,
+                    { color: hasActiveSubscription ? colors.success : colors.foreground },
+                  ]}
+                >
+                  {hasActiveSubscription ? "SUBSCRIPTION ACTIVE" : "CHOOSE A PLAN TO START"}
+                </Text>
+              </View>
+            </View>
+
             <View style={styles.homeOrbArea}>
               <Animated.View
                 style={[
                   styles.orbAura,
-                  { backgroundColor: nativeTunnelConnected ? colors.success : colors.primary },
+                  { backgroundColor: hasActiveSubscription ? colors.primary : colors.accent },
                   auraStyle,
                 ]}
               />
               <View
                 style={[
                   styles.orbRingOuter,
-                  { borderColor: nativeTunnelConnected ? colors.success : colors.orbEdge },
+                  { borderColor: hasActiveSubscription ? colors.orbEdge : colors.border },
                 ]}
               >
-                <Pressable
-                  onPress={() => {
-                    if (!hasActiveSubscription) {
-                      setActiveTab("plans");
-                    } else if (!nativeTunnelConnected) {
-                      Alert.alert(
-                        "VPN connection unavailable",
-                        "Your subscription is active, but this service does not yet have a live WireGuard connection configured.",
-                      );
-                    }
-                  }}
-                  style={({ pressed }) => [styles.orb, pressed ? styles.pressed : null]}
-                  accessibilityRole="button"
-                  accessibilityLabel={nativeTunnelConnected ? "VPN connected" : "Connect to VPN"}
-                  testID="vpn-connect"
+                <LinearGradient
+                  colors={[colors.backgroundGlow, colors.background]}
+                  style={styles.orb}
+                  testID="subscription-status-orb"
                 >
-                  <LinearGradient
-                    colors={nativeTunnelConnected ? [colors.success, "#00bfe8"] : ["#101c43", "#0b1431"]}
-                    style={styles.orbInner}
-                  >
+                  <View style={styles.orbInner}>
                     <Feather
-                      name={nativeTunnelConnected ? "check" : "power"}
-                      size={31}
-                      color={nativeTunnelConnected ? colors.primaryForeground : "#c8d8ff"}
+                      name={hasActiveSubscription ? "check" : "shield"}
+                      size={34}
+                      color={hasActiveSubscription ? colors.success : colors.accent}
                     />
                     <Text style={[styles.orbLabel, { color: colors.foreground }]}>
-                      {nativeTunnelConnected ? "CONNECTED" : "CONNECT"}
+                      {hasActiveSubscription ? "SUBSCRIPTION" : "GET STARTED"}
                     </Text>
-                  </LinearGradient>
-                </Pressable>
+                    <Text
+                      style={[
+                        styles.orbStateLabel,
+                        { color: hasActiveSubscription ? colors.success : colors.mutedForeground },
+                      ]}
+                    >
+                      {hasActiveSubscription ? "ACTIVE" : "VIEW PLANS"}
+                    </Text>
+                  </View>
+                </LinearGradient>
               </View>
             </View>
-            <View style={[styles.homeStatusCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={[styles.statusDot, { backgroundColor: nativeTunnelConnected ? colors.success : colors.accent }]} />
-              <View style={styles.homeStatusCopy}>
-                <Text style={[styles.rowTitle, styles.centered, { color: colors.foreground }]}>
-                  {nativeTunnelConnected ? "Connected" : "Not Connected"}
-                </Text>
-                <Text style={[styles.smallCopy, styles.centered, { color: colors.mutedForeground }]}>
-                  {nativeTunnelConnected
-                    ? "Secure & private"
-                    : hasActiveSubscription
-                      ? "Subscription active · VPN server unavailable"
-                      : "Get online and stay private"}
-                </Text>
-              </View>
-            </View>
-
             <Pressable
-              onPress={() => Alert.alert(
-                "Demo server locations",
-                "These locations are previews only. A live WireGuard server has not been configured yet.",
-              )}
-              style={[styles.homeActionCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={() => setActiveTab(hasActiveSubscription ? "activity" : "plans")}
+              style={({ pressed }) => [
+                styles.homeStatusCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: hasActiveSubscription ? colors.successBorder : colors.border,
+                },
+                pressed ? styles.pressed : null,
+              ]}
               accessibilityRole="button"
-              accessibilityLabel="Select server location"
+              accessibilityLabel={hasActiveSubscription ? "View active subscription details" : "Choose a subscription plan"}
+              testID="open-plans"
             >
-              <IconTile icon="globe" color={colors.accent} background={colors.iconSurface} />
-              <View style={styles.flexOne}>
-                <Text style={[styles.rowTitle, { color: colors.foreground }]}>Select Server</Text>
-                <Text style={[styles.smallCopy, { color: colors.mutedForeground }]}>Choose a server location</Text>
+              <IconTile
+                icon={hasActiveSubscription ? "check" : "calendar"}
+                color={hasActiveSubscription ? colors.success : colors.accent}
+                background={hasActiveSubscription ? colors.successSurface : colors.iconSurface}
+                size={18}
+              />
+              <View style={styles.homeStatusCopy}>
+                <Text style={[styles.rowTitle, { color: colors.foreground }]}>
+                  {hasActiveSubscription ? "Your subscription is active" : "No active subscription"}
+                </Text>
+                <Text style={[styles.smallCopy, { color: colors.mutedForeground }]} numberOfLines={1}>
+                  {hasActiveSubscription && subscription
+                    ? `${subscriptionPlan?.label ?? "Active plan"} · Expires ${formatDate(subscription.expiresAt)}`
+                    : "Choose a package to activate your subscription."}
+                </Text>
               </View>
               <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
             </Pressable>
 
-            <View style={[styles.homeSubscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <IconTile icon="shield" color={colors.accent} background={colors.iconSurface} size={17} />
-              <View style={styles.flexOne}>
-                <Text style={[styles.rowTitle, { color: colors.foreground }]}>Your Subscription</Text>
-                <Text style={[styles.smallCopy, { color: colors.mutedForeground }]}>
-                  {hasActiveSubscription && subscription
-                    ? `${plans.find((plan) => plan.code === subscription.planCode)?.label ?? "Active plan"} · Expires ${formatDate(subscription.expiresAt)}`
-                    : "No active subscription"}
+            {featuredPlan ? (
+            <Pressable
+              onPress={() => startPaymentForPlan(featuredPlan.code)}
+              style={({ pressed }) => [styles.homePromoCard, pressed ? styles.pressed : null]}
+              accessibilityRole="button"
+              accessibilityLabel={`Buy ${featuredPlan.durationDays} days for KES ${formatAmount(featuredPlan.amountKes)}`}
+              testID="featured-plan-checkout"
+            >
+              <LinearGradient
+                colors={[colors.primary, colors.accent]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.homePromoGradient}
+              >
+                <View style={styles.homePromoIcon}>
+                  <Feather name="gift" size={32} color={colors.primaryForeground} />
+                </View>
+                <View style={styles.homePromoCopy}>
+                  <Text style={styles.homePromoBadge}>FEATURED PACKAGE</Text>
+                  <Text style={styles.homePromoTitle}>
+                    GET {featuredPlan.durationDays} {featuredPlan.durationDays === 1 ? "DAY" : "DAYS"}
+                  </Text>
+                  <Text style={styles.homePromoPrice}>KES {formatAmount(featuredPlan.amountKes)}</Text>
+                  <Text style={styles.homePromoSubcopy}>{featuredPlan.label} · Paid securely with M-Pesa</Text>
+                </View>
+                <View style={styles.homePromoArrow}>
+                  <Feather name="arrow-right" size={18} color={colors.primary} />
+                </View>
+              </LinearGradient>
+            </Pressable>
+            ) : null}
+
+            <View style={[styles.sectionRow, styles.homePlansHeading]}>
+              <View>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Popular plans</Text>
+                <Text style={[styles.sectionSubcopy, { color: colors.mutedForeground }]}>
+                  Pick a package that suits you
                 </Text>
               </View>
               <Pressable
-                onPress={() => hasActiveSubscription ? setActiveTab("activity") : setActiveTab("plans")}
-                style={[styles.homePlanButton, { backgroundColor: colors.accent }]}
+                onPress={() => setActiveTab("plans")}
+                style={styles.textAction}
                 accessibilityRole="button"
-                testID="open-plans"
+                accessibilityLabel="See all plans"
+                testID="see-all-plans"
               >
-                <Text style={styles.homePlanButtonText}>{hasActiveSubscription ? "View Details" : "View Plans"}</Text>
+                <Text style={[styles.actionLabel, { color: colors.primary }]}>See all</Text>
+                <Feather name="arrow-right" size={14} color={colors.primary} />
               </Pressable>
             </View>
 
-            <View style={[styles.sectionRow, styles.serverHeading]}>
-              <Text style={[styles.sectionSubcopy, { color: colors.foreground }]}>Available Servers (Demo)</Text>
-            </View>
-            <View style={styles.demoGrid}>
-              {[
-                { country: "Germany", city: "Frankfurt", code: "DE", flag: ["#1a1a1a", "#d4474e", "#e4bc50"] },
-                { country: "Netherlands", city: "Amsterdam", code: "NL", flag: ["#d4474e", "#e9edf7", "#4169a9"] },
-              ].map((server) => (
-                <View
-                  key={server.code}
-                  style={[styles.demoCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                  testID={`server-preview-${server.code.toLowerCase()}`}
-                >
-                  <View style={styles.demoServerRow}>
-                    <View style={styles.flag}>
-                      {server.flag.map((stripe, index) => (
-                        <View key={`${server.code}-${stripe}`} style={{ flex: 1, backgroundColor: stripe, width: "100%" }} />
-                      ))}
+            {homePopularPlans.length ? (
+              <View style={styles.homePopularGrid}>
+                {homePopularPlans.map((plan) => (
+                  <Pressable
+                    key={plan.code}
+                    onPress={() => startPaymentForPlan(plan.code)}
+                    style={({ pressed }) => [
+                      styles.homePopularCard,
+                      { backgroundColor: colors.card, borderColor: colors.border },
+                      pressed ? styles.pressed : null,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Buy ${plan.durationDays} days for KES ${formatAmount(plan.amountKes)}`}
+                    testID={`home-plan-${plan.code}`}
+                  >
+                    <View style={[styles.homePopularIcon, { backgroundColor: colors.iconSurface }]}>
+                      <Feather name="calendar" size={18} color={colors.primary} />
                     </View>
-                    <View style={styles.flexOne}>
-                      <Text style={[styles.demoCountry, { color: colors.foreground }]}>{server.country}</Text>
-                      <Text style={[styles.demoCity, { color: colors.mutedForeground }]}>{server.city}</Text>
+                    <View style={styles.homePopularCopy}>
+                      <Text style={[styles.homePopularDays, { color: colors.foreground }]}>
+                        {plan.durationDays} {plan.durationDays === 1 ? "Day" : "Days"}
+                      </Text>
+                      <Text style={[styles.homePopularPrice, { color: colors.foreground }]}>
+                        KES {formatAmount(plan.amountKes)}
+                      </Text>
                     </View>
-                  </View>
-                  <View style={[styles.demoTag, { backgroundColor: colors.badgeSurface }]}>
-                    <Text style={[styles.demoTagText, { color: colors.accent }]}>Demo</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-            {sessionMessage || statusQuery.isError ? (
+                    <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+                  </Pressable>
+                ))}
+              </View>
+            ) : plansQuery.isLoading ? (
+              <View style={styles.homePlansLoading}>
+                <ActivityIndicator color={colors.primary} />
+                <Text style={[styles.smallCopy, { color: colors.mutedForeground }]}>Loading packages…</Text>
+              </View>
+            ) : (
+              <View style={[styles.homePlansEmpty, { borderColor: colors.border, backgroundColor: colors.card }]}>
+                <Text style={[styles.smallCopy, { color: colors.mutedForeground }]}>
+                  Packages are temporarily unavailable. Please try again shortly.
+                </Text>
+              </View>
+            )}
+
+            <Pressable
+              onPress={() => void openSupport()}
+              style={({ pressed }) => [
+                styles.homeSupportCard,
+                { backgroundColor: colors.card, borderColor: colors.border },
+                pressed ? styles.pressed : null,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Chat with DAS VPN support on WhatsApp"
+              testID="home-support"
+            >
+              <View style={[styles.homeSupportIcon, { backgroundColor: colors.successSurface }]}>
+                <Feather name="message-circle" size={20} color={colors.success} />
+              </View>
+              <View style={styles.flexOne}>
+                <Text style={[styles.rowTitle, { color: colors.foreground }]}>Need help?</Text>
+                <Text style={[styles.smallCopy, { color: colors.mutedForeground }]}>
+                  Chat with our support team
+                </Text>
+              </View>
+              <Text style={[styles.homeSupportAction, { color: colors.primary }]}>Chat</Text>
+              <Feather name="arrow-up-right" size={15} color={colors.primary} />
+            </Pressable>
+
+            {sessionMessage || statusQuery.isError || plansQuery.isError ? (
               <InlineError
-                message={sessionMessage || "Subscription details could not be refreshed. Retry to check your status."}
-                onRetry={() => void (sessionMessage ? startDeviceSession() : statusQuery.refetch())}
+                message={
+                  sessionMessage
+                    || (statusQuery.isError
+                      ? "Subscription details could not be refreshed. Retry to check your status."
+                      : "Plans could not be refreshed. Retry to check current packages.")
+                }
+                onRetry={() => void (
+                  sessionMessage
+                    ? startDeviceSession()
+                    : statusQuery.isError
+                      ? statusQuery.refetch()
+                      : plansQuery.refetch()
+                )}
                 colors={colors}
               />
             ) : null}
@@ -1216,10 +1388,7 @@ export default function HomeScreen() {
               </Pressable>
               <View style={[styles.profileMenuDivider, { backgroundColor: colors.border }]} />
               <Pressable
-                onPress={() => Alert.alert(
-                  "Help & Support",
-                  "For account recovery, open the settings icon and use your device recovery key.",
-                )}
+                onPress={() => void openSupport()}
                 style={styles.profileMenuRow}
                 accessibilityRole="button"
               >
@@ -1364,7 +1533,8 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, minHeight: "100%" },
   scrollView: { flex: 1 },
-  content: { paddingHorizontal: 24, maxWidth: 620, width: "100%", alignSelf: "center" },
+  content: { flexGrow: 1, paddingHorizontal: 24, maxWidth: 620, width: "100%", alignSelf: "center" },
+  webRefreshIndicator: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, overflow: "hidden" },
   topHalo: { position: "absolute", top: 0, left: 0, right: 0, height: 340 },
   header: { flexDirection: "row", alignItems: "center", minHeight: 42, marginBottom: 13 },
   brand: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
@@ -1390,21 +1560,45 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 8, letterSpacing: 1.2, fontWeight: "700" },
   anonymousLabel: { fontSize: 7, letterSpacing: 0.9, fontWeight: "700" },
   orbArea: { height: 190, alignItems: "center", justifyContent: "center", marginTop: 0 },
-  homeOrbArea: { height: 155, alignItems: "center", justifyContent: "center", marginTop: -3, marginBottom: 5 },
-  orbAura: { position: "absolute", height: 151, width: 151, borderRadius: 80 },
-  orbRingOuter: { width: 149, height: 149, borderRadius: 76, borderWidth: 2, alignItems: "center", justifyContent: "center", shadowColor: "#245bff", shadowOpacity: 0.38, shadowRadius: 22, elevation: 8 },
-  orb: { height: 138, width: 138, borderRadius: 70, overflow: "hidden" },
-  orbInner: { flex: 1, alignItems: "center", justifyContent: "center", gap: 7 },
-  orbLabel: { fontSize: 9, letterSpacing: 0.5, fontWeight: "700" },
+  homeHeroIntro: { alignItems: "center", marginTop: 1, marginBottom: 1 },
+  homeHeadline: { fontSize: 25, lineHeight: 30, fontWeight: "700", letterSpacing: -0.65, textAlign: "center" },
+  homeStatusPill: { minHeight: 27, marginTop: 9, paddingHorizontal: 11, borderRadius: 15, borderWidth: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  homeStatusPillText: { fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
+  homeOrbArea: { height: 190, alignItems: "center", justifyContent: "center", marginTop: 0, marginBottom: 0 },
+  orbAura: { position: "absolute", height: 178, width: 178, borderRadius: 90 },
+  orbRingOuter: { width: 174, height: 174, borderRadius: 90, borderWidth: 2, alignItems: "center", justifyContent: "center", shadowOpacity: 0.4, shadowRadius: 24, elevation: 8 },
+  orb: { height: 158, width: 158, borderRadius: 80, overflow: "hidden" },
+  orbInner: { flex: 1, alignItems: "center", justifyContent: "center", gap: 6 },
+  orbLabel: { fontSize: 8, letterSpacing: 1.2, fontWeight: "700" },
+  orbStateLabel: { fontSize: 13, letterSpacing: 0.8, fontWeight: "800" },
   centered: { textAlign: "center" },
   connectionTitle: { textAlign: "center", fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
   connectionSubcopy: { textAlign: "center", fontSize: 10, marginTop: 5, lineHeight: 15 },
-  homeStatusCard: { width: "100%", minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 7, marginBottom: 9, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  homeStatusCopy: { alignItems: "center" },
-  homeActionCard: { minHeight: 57, borderWidth: 1, borderRadius: 13, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 9 },
-  homeSubscriptionCard: { minHeight: 63, borderWidth: 1, borderRadius: 13, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 9 },
+  homeStatusCard: { width: "100%", minHeight: 63, borderWidth: 1, borderRadius: 15, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 14, flexDirection: "row", alignItems: "center", gap: 10 },
+  homeStatusCopy: { flex: 1, gap: 1 },
   homePlanButton: { minHeight: 28, paddingHorizontal: 12, borderRadius: 14, alignItems: "center", justifyContent: "center" },
   homePlanButtonText: { color: "#ffffff", fontSize: 9, fontWeight: "700" },
+  homePromoCard: { borderRadius: 17, overflow: "hidden", marginBottom: 17, shadowOpacity: 0.2, shadowRadius: 16, elevation: 6 },
+  homePromoGradient: { minHeight: 116, paddingHorizontal: 13, paddingVertical: 13, flexDirection: "row", alignItems: "center", gap: 11 },
+  homePromoIcon: { height: 64, width: 64, borderRadius: 19, backgroundColor: "rgba(255,255,255,0.16)", alignItems: "center", justifyContent: "center" },
+  homePromoCopy: { flex: 1, minWidth: 0 },
+  homePromoBadge: { color: "#ffffff", fontSize: 7, lineHeight: 12, fontWeight: "800", letterSpacing: 0.8, opacity: 0.88 },
+  homePromoTitle: { color: "#ffffff", fontSize: 13, lineHeight: 18, fontWeight: "700", marginTop: 3 },
+  homePromoPrice: { color: "#ffffff", fontSize: 21, lineHeight: 25, fontWeight: "800", letterSpacing: -0.4 },
+  homePromoSubcopy: { color: "#f0ebff", fontSize: 8, lineHeight: 12, marginTop: 2 },
+  homePromoArrow: { height: 32, width: 32, borderRadius: 16, backgroundColor: "#ffffff", alignItems: "center", justifyContent: "center" },
+  homePlansHeading: { marginBottom: 9 },
+  homePopularGrid: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  homePopularCard: { flex: 1, minWidth: 0, minHeight: 75, borderWidth: 1, borderRadius: 14, paddingHorizontal: 9, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 8 },
+  homePopularIcon: { height: 38, width: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  homePopularCopy: { flex: 1, minWidth: 0 },
+  homePopularDays: { fontSize: 13, lineHeight: 18, fontWeight: "700" },
+  homePopularPrice: { fontSize: 13, lineHeight: 18, fontWeight: "700" },
+  homePlansLoading: { minHeight: 75, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 9 },
+  homePlansEmpty: { minHeight: 60, borderWidth: 1, borderRadius: 14, marginBottom: 14, paddingHorizontal: 13, justifyContent: "center" },
+  homeSupportCard: { minHeight: 65, borderWidth: 1, borderRadius: 15, paddingHorizontal: 11, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 9 },
+  homeSupportIcon: { height: 39, width: 39, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  homeSupportAction: { fontSize: 10, fontWeight: "700" },
   pressed: { opacity: 0.78, transform: [{ scale: 0.985 }] },
   sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   sectionTitle: { fontSize: 14, fontWeight: "700", letterSpacing: -0.2 },
@@ -1419,16 +1613,6 @@ const styles = StyleSheet.create({
   microCopy: { fontSize: 8, lineHeight: 12, marginTop: 2 },
   verifiedBadge: { borderRadius: 7, paddingVertical: 5, paddingHorizontal: 7 },
   verifiedText: { fontSize: 7, fontWeight: "700", letterSpacing: 0.6 },
-  serverHeading: { marginTop: 14, marginBottom: 7 },
-  demoGrid: { flexDirection: "row", gap: 8 },
-  demoCard: { flex: 1, minHeight: 69, borderWidth: 1, borderRadius: 12, padding: 9, justifyContent: "space-between" },
-  demoCardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 7 },
-  demoServerRow: { flexDirection: "row", alignItems: "center", gap: 9 },
-  flag: { height: 17, width: 23, borderRadius: 4, overflow: "hidden" },
-  demoTag: { alignSelf: "flex-end", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  demoTagText: { fontSize: 7, fontWeight: "700" },
-  demoCountry: { fontSize: 10, fontWeight: "600" },
-  demoCity: { fontSize: 8, marginTop: 1 },
   privacyFootnote: { flexDirection: "row", gap: 8, alignItems: "flex-start", marginTop: 20, paddingHorizontal: 3 },
   privacyCopy: { flex: 1, fontSize: 9, lineHeight: 14 },
   planList: { gap: 8 },
