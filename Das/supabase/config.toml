@@ -1,0 +1,32 @@
+[functions.device-session]
+verify_jwt = false
+
+[functions.recover-session]
+verify_jwt = false
+
+[functions.vpn-plans]
+verify_jwt = false
+
+[functions.vpn-status]
+verify_jwt = false
+
+[functions.vpn-servers]
+verify_jwt = false
+
+[functions.vpn-activity]
+verify_jwt = false
+
+[functions.mpesa-initiate]
+verify_jwt = false
+
+[functions.mpesa-callback]
+verify_jwt = false
+
+[functions.mpesa-payment-status]
+verify_jwt = false
+
+[functions.vpn-connect]
+verify_jwt = false
+
+[functions.vpn-disconnect]
+verify_jwt = false

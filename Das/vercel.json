@@ -1,0 +1,5 @@
+{
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @workspace/api-server run build && EXPO_PUBLIC_DOMAIN=dasvpn.vercel.app pnpm --filter @workspace/das-vpn run build:web",
+  "outputDirectory": "artifacts/das-vpn/dist"
+}

@@ -1,0 +1,1 @@
+- [Subscription-only product scope](subscription-scope.md) — Treat verified purchases as subscription activation; never imply a VPN tunnel is live unless it is actually connected.
