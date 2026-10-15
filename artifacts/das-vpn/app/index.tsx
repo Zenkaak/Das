@@ -242,9 +242,16 @@ export default function HomeScreen() {
   const hasActiveSubscription = Boolean(
     subscription?.expiresAt && new Date(subscription.expiresAt).getTime() > Date.now(),
   );
-  const canPurchase = sessionReady;
   const currentPlan = plans.find((plan) => plan.code === selectedPlan) ?? plans[2];
   const latestPayment = paymentQuery.data ?? statusQuery.data?.latestPayment;
+
+  const openPlan = (planCode: PlanCode) => {
+    setSelectedPlan(planCode);
+    setPaymentError("");
+    setPaymentNotice("");
+    setPaymentOpen(true);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
 
   const finishRecoveryNotice = async () => {
     await setSessionValue(RECOVERY_SEEN_KEY, "yes");
@@ -357,35 +364,55 @@ export default function HomeScreen() {
       />
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, activeTab === "plans" ? styles.plansContent : null]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.header}>
-          <View style={styles.brand}>
-            <View style={[styles.brandMark, { backgroundColor: colors.primary }]}>
-              <Feather name="shield" size={17} color={colors.primaryForeground} />
-            </View>
-            <View>
-              <Text style={[styles.brandName, { color: colors.foreground }]}>DAS VPN</Text>
-              <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>PRIVATE BY DESIGN</Text>
-            </View>
-          </View>
-          <Pressable
-            onPress={() => {
-              setPaymentError("");
-              setShowRecovery(false);
-              setRecoveryInput("");
-              setRecovering(false);
-              setShowRecovery(true);
-            }}
-            style={[styles.recoveryButton, { borderColor: colors.border }]}
-            accessibilityRole="button"
-            accessibilityLabel="View recovery key"
-            testID="recovery-open"
-          >
-            <Feather name="key" size={16} color={colors.mutedForeground} />
-          </Pressable>
+        <View style={[styles.header, activeTab === "plans" ? styles.plansHeader : null]}>
+          {activeTab === "plans" ? (
+            <>
+              <Pressable
+                onPress={() => setActiveTab("home")}
+                style={styles.plansBackButton}
+                accessibilityRole="button"
+                accessibilityLabel="Back to home"
+                testID="plans-back"
+              >
+                <Feather name="arrow-left" size={19} color={colors.foreground} />
+              </Pressable>
+              <View style={styles.plansHeaderCopy}>
+                <Text style={[styles.plansHeaderTitle, { color: colors.foreground }]}>Subscription Plans</Text>
+                <Text style={[styles.plansHeaderSubtitle, { color: colors.mutedForeground }]}>Choose the best plan for your needs</Text>
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.brand}>
+                <View style={[styles.brandMark, { backgroundColor: colors.primary }]}>
+                  <Feather name="shield" size={17} color={colors.primaryForeground} />
+                </View>
+                <View>
+                  <Text style={[styles.brandName, { color: colors.foreground }]}>DAS VPN</Text>
+                  <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>PRIVATE BY DESIGN</Text>
+                </View>
+              </View>
+              <Pressable
+                onPress={() => {
+                  setPaymentError("");
+                  setShowRecovery(false);
+                  setRecoveryInput("");
+                  setRecovering(false);
+                  setShowRecovery(true);
+                }}
+                style={[styles.recoveryButton, { borderColor: colors.border }]}
+                accessibilityRole="button"
+                accessibilityLabel="View recovery key"
+                testID="recovery-open"
+              >
+                <Feather name="key" size={16} color={colors.mutedForeground} />
+              </Pressable>
+            </>
+          )}
         </View>
 
         {activeTab === "home" ? (
@@ -535,80 +562,118 @@ export default function HomeScreen() {
 
         {activeTab === "plans" ? (
         <>
-        <View style={styles.sectionHeading}>
-          <View>
-            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Plans for real life</Text>
-            <Text style={[styles.sectionCaption, { color: colors.mutedForeground }]}>
-              One-time payment · access begins after verification
-            </Text>
-          </View>
-        </View>
-
-        {!canPurchase ? (
-          <View style={[styles.noticeCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
-            <Feather name="info" size={17} color={colors.accent} />
-            <Text style={[styles.noticeText, { color: colors.mutedForeground }]}>
-              Preparing your anonymous device session. Plans unlock as soon as it is ready.
-            </Text>
+        {!sessionReady ? (
+          <View style={[styles.planSessionNotice, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            {sessionMessage ? (
+              <Feather name="alert-circle" size={16} color={colors.destructive} />
+            ) : (
+              <ActivityIndicator size="small" color={colors.accent} />
+            )}
+            <View style={styles.planSessionCopy}>
+              <Text style={[styles.planSessionTitle, { color: colors.foreground }]}>
+                {sessionMessage ? "Secure session needs attention" : "Setting up your secure session"}
+              </Text>
+              <Text style={[styles.planSessionText, { color: colors.mutedForeground }]}>
+                {sessionMessage || "You can choose a plan now. Payment will be ready when setup completes."}
+              </Text>
+            </View>
+            {sessionMessage ? (
+              <Pressable
+                onPress={() => void startDeviceSession()}
+                style={styles.planSessionRetry}
+                accessibilityRole="button"
+                testID="retry-session-plans"
+              >
+                <Text style={[styles.planSessionRetryText, { color: colors.primary }]}>Retry</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
 
-        <View style={styles.planGrid}>
+        <View style={styles.planList}>
           {plans.map((plan) => {
             const active = subscription?.planCode === plan.code;
-            return (
+            const popular = "popular" in plan && plan.popular;
+            const bestValue = "bestValue" in plan && plan.bestValue;
+            const featured = Boolean(popular || bestValue);
+            const badge = popular ? "MOST POPULAR" : bestValue ? "BEST VALUE" : null;
+            const accentColor = popular ? colors.accent : colors.primary;
+            const validity = plan.days === 3 ? "72 hours" : plan.days + " days";
+            const price = (
+              <Text style={[styles.planPrice, { color: colors.foreground }]}>
+                <Text style={[styles.planCurrency, { color: colors.mutedForeground }]}>KES </Text>
+                <Text style={styles.planPriceValue}>{plan.price.toLocaleString("en-KE")}</Text>
+              </Text>
+            );
+            const subscribeButton = (
               <Pressable
-                key={plan.code}
-                onPress={() => {
-                  if (!canPurchase) return;
-                  setSelectedPlan(plan.code);
-                  setPaymentError("");
-                  setPaymentNotice("");
-                  setPaymentOpen(true);
-                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }}
+                onPress={() => openPlan(plan.code)}
                 style={({ pressed }) => [
-                  styles.planCard,
-                  {
-                    backgroundColor: colors.card,
-                    borderColor: active ? colors.primary : colors.border,
-                    opacity: canPurchase ? 1 : 0.6,
-                  },
-                  pressed && canPurchase ? styles.pressed : null,
+                  featured ? styles.featuredSubscribeButton : styles.compactSubscribeButton,
+                  pressed ? styles.pressed : null,
                 ]}
-                disabled={!canPurchase}
                 accessibilityRole="button"
-                accessibilityState={{ disabled: !canPurchase }}
-                accessibilityLabel={`${plan.name} plan, ${plan.price} Kenyan shillings`}
-                testID={`plan-${plan.code}`}
+                accessibilityLabel={"Subscribe to " + plan.name + " for " + plan.price + " Kenyan shillings"}
+                testID={"plan-" + plan.code}
               >
-                {"popular" in plan && plan.popular ? (
-                  <View style={[styles.popularTag, { backgroundColor: colors.accent }]}>
-                    <Text style={[styles.popularTagText, { color: colors.background }]}>MOST POPULAR</Text>
+                {featured ? (
+                  <LinearGradient colors={[colors.primary, colors.accent]} style={styles.featuredSubscribeContent}>
+                    <Text style={[styles.featuredSubscribeText, { color: colors.primaryForeground }]}>Subscribe</Text>
+                  </LinearGradient>
+                ) : (
+                  <View style={[styles.compactSubscribeContent, { borderColor: accentColor, backgroundColor: colors.secondary }]}>
+                    <Text style={[styles.compactSubscribeText, { color: colors.primary }]}>Subscribe</Text>
                   </View>
-                ) : null}
-                {"bestValue" in plan && plan.bestValue ? (
-                  <View style={[styles.popularTag, { backgroundColor: colors.primary }]}>
-                    <Text style={[styles.popularTagText, { color: colors.primaryForeground }]}>BEST VALUE</Text>
-                  </View>
-                ) : null}
-                <Text style={[styles.planName, { color: colors.mutedForeground }]}>{plan.name}</Text>
-                <Text style={[styles.planPrice, { color: colors.foreground }]}>
-                  <Text style={[styles.planCurrency, { color: colors.mutedForeground }]}>KES </Text>
-                  {plan.price.toLocaleString("en-KE")}
-                </Text>
-                <Text style={[styles.planDays, { color: colors.mutedForeground }]}>
-                  {plan.days} days · no auto-renewal
-                </Text>
-                {active ? (
-                  <Text style={[styles.activePlanTag, { color: colors.primary }]}>CURRENT PLAN</Text>
-                ) : null}
+                )}
               </Pressable>
+            );
+
+            return (
+              <View
+                key={plan.code}
+                style={[
+                  styles.planCard,
+                  { backgroundColor: colors.card, borderColor: active ? colors.primary : popular ? colors.accent : bestValue ? colors.primary : colors.border },
+                  featured ? styles.featuredPlanCard : null,
+                ]}
+              >
+                {badge ? (
+                  <View style={[styles.popularTag, { backgroundColor: accentColor }]}>
+                    <Text style={[styles.popularTagText, { color: colors.primaryForeground }]}>{badge}</Text>
+                  </View>
+                ) : null}
+                {featured ? (
+                  <>
+                    <View style={styles.featuredPlanDetails}>
+                      <View style={styles.planInfo}>
+                        <Text style={[styles.planName, { color: colors.foreground }]}>{plan.name}</Text>
+                        <Text style={[styles.planDays, { color: colors.mutedForeground }]}>Validity: {validity}</Text>
+                        {active ? <Text style={[styles.activePlanTag, { color: colors.primary }]}>CURRENT PLAN</Text> : null}
+                      </View>
+                      {price}
+                    </View>
+                    {subscribeButton}
+                  </>
+                ) : (
+                  <View style={styles.compactPlanDetails}>
+                    <View style={styles.planInfo}>
+                      <Text style={[styles.planName, { color: colors.foreground }]}>{plan.name}</Text>
+                      <Text style={[styles.planDays, { color: colors.mutedForeground }]}>Validity: {validity}</Text>
+                      {active ? <Text style={[styles.activePlanTag, { color: colors.primary }]}>CURRENT PLAN</Text> : null}
+                    </View>
+                    <View style={styles.compactPlanActions}>
+                      {price}
+                      {subscribeButton}
+                    </View>
+                  </View>
+                )}
+              </View>
             );
           })}
         </View>
         </>
         ) : null}
+
 
         {activeTab === "plans" && hasActiveSubscription && subscription?.expiresAt ? (
           <View style={[styles.expiryCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
@@ -944,6 +1009,34 @@ export default function HomeScreen() {
               <Text style={[styles.countryCode, { color: colors.mutedForeground }]}>KE</Text>
             </View>
 
+            {!sessionReady ? (
+              <View style={[styles.paymentSessionNotice, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
+                {sessionMessage ? (
+                  <Feather name="alert-circle" size={15} color={colors.destructive} />
+                ) : (
+                  <ActivityIndicator size="small" color={colors.accent} />
+                )}
+                <View style={styles.planSessionCopy}>
+                  <Text style={[styles.planSessionTitle, { color: colors.foreground }]}>
+                    {sessionMessage ? "Secure session needs attention" : "Preparing secure session"}
+                  </Text>
+                  <Text style={[styles.planSessionText, { color: colors.mutedForeground }]}>
+                    {sessionMessage || "No payment will be requested until your session is ready."}
+                  </Text>
+                </View>
+                {sessionMessage ? (
+                  <Pressable
+                    onPress={() => void startDeviceSession()}
+                    style={styles.planSessionRetry}
+                    accessibilityRole="button"
+                    testID="retry-session-payment"
+                  >
+                    <Text style={[styles.planSessionRetryText, { color: colors.primary }]}>Retry</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+
             {paymentError ? (
               <View style={styles.formError}>
                 <Feather name="alert-circle" size={15} color={colors.destructive} />
@@ -1070,7 +1163,13 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   scrollView: { flex: 1 },
   content: { paddingHorizontal: 22, paddingTop: 67, paddingBottom: 28, maxWidth: 620, width: "100%", alignSelf: "center" },
+  plansContent: { paddingTop: 16 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 34 },
+  plansHeader: { justifyContent: "flex-start", gap: 11, marginBottom: 27 },
+  plansBackButton: { width: 30, height: 34, alignItems: "center", justifyContent: "center" },
+  plansHeaderCopy: { flex: 1, gap: 3 },
+  plansHeaderTitle: { fontSize: 16, lineHeight: 21, fontFamily: "Inter_700Bold", letterSpacing: -0.2 },
+  plansHeaderSubtitle: { fontSize: 9, lineHeight: 13, fontFamily: "Inter_400Regular" },
   brand: { flexDirection: "row", alignItems: "center", gap: 11 },
   brandMark: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   brandName: { fontSize: 15, fontFamily: "Inter_700Bold", letterSpacing: 0.7 },
@@ -1111,20 +1210,39 @@ const styles = StyleSheet.create({
   serverCountry: { fontSize: 10, lineHeight: 15, fontFamily: "Inter_400Regular" },
   flagFallback: { width: 34, height: 24, borderRadius: 5, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   flagFallbackText: { fontSize: 9, fontFamily: "Inter_700Bold" },
-  planGrid: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
-  planCard: { width: "48.5%", minHeight: 100, borderWidth: 1, borderRadius: 17, paddingHorizontal: 13, paddingVertical: 13, justifyContent: "center", position: "relative", overflow: "hidden" },
-  popularTag: { position: "absolute", top: 0, right: 0, borderBottomLeftRadius: 8, paddingHorizontal: 7, paddingVertical: 4 },
+  planList: { gap: 9 },
+  planCard: { minHeight: 74, borderWidth: 1, borderRadius: 15, paddingHorizontal: 13, paddingVertical: 10, justifyContent: "center", position: "relative", overflow: "hidden" },
+  featuredPlanCard: { minHeight: 114, paddingTop: 25, paddingBottom: 11, gap: 10 },
+  popularTag: { position: "absolute", top: 0, left: 13, borderBottomLeftRadius: 7, borderBottomRightRadius: 7, paddingHorizontal: 8, paddingVertical: 4 },
   popularTagText: { fontSize: 7, fontFamily: "Inter_700Bold", letterSpacing: 0.6 },
-  planName: { fontSize: 10, fontFamily: "Inter_600SemiBold", marginBottom: 7 },
-  planPrice: { fontSize: 21, fontFamily: "Inter_700Bold", letterSpacing: -0.7 },
-  planCurrency: { fontSize: 10, fontFamily: "Inter_600SemiBold", letterSpacing: 0 },
-  planDays: { fontSize: 9, fontFamily: "Inter_400Regular", marginTop: 4 },
-  activePlanTag: { marginTop: 7, fontSize: 8, fontFamily: "Inter_700Bold", letterSpacing: 0.7 },
+  featuredPlanDetails: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  compactPlanDetails: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  planInfo: { flex: 1, gap: 4 },
+  compactPlanActions: { alignItems: "flex-end", gap: 6, minWidth: 88 },
+  planName: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
+  planPrice: { fontSize: 17, fontFamily: "Inter_700Bold", letterSpacing: -0.55, textAlign: "right" },
+  planCurrency: { fontSize: 8, fontFamily: "Inter_600SemiBold", letterSpacing: 0 },
+  planPriceValue: { fontSize: 17, fontFamily: "Inter_700Bold", letterSpacing: -0.55 },
+  planDays: { fontSize: 8, lineHeight: 12, fontFamily: "Inter_400Regular" },
+  activePlanTag: { marginTop: 1, fontSize: 7, fontFamily: "Inter_700Bold", letterSpacing: 0.7 },
+  compactSubscribeButton: { width: 82, minHeight: 29, borderRadius: 9, overflow: "hidden" },
+  compactSubscribeContent: { flex: 1, borderWidth: 1, borderRadius: 9, alignItems: "center", justifyContent: "center", paddingHorizontal: 9 },
+  compactSubscribeText: { fontSize: 8, fontFamily: "Inter_600SemiBold" },
+  featuredSubscribeButton: { width: "100%", minHeight: 35, borderRadius: 9, overflow: "hidden" },
+  featuredSubscribeContent: { flex: 1, alignItems: "center", justifyContent: "center", borderRadius: 9 },
+  featuredSubscribeText: { fontSize: 9, fontFamily: "Inter_700Bold" },
   expiryCard: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 13, paddingVertical: 13, marginTop: 13, flexDirection: "row", alignItems: "center", gap: 11 },
   expiryTitle: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
   expiryText: { marginTop: 3, fontSize: 9, fontFamily: "Inter_400Regular" },
   noticeCard: { borderWidth: 1, borderRadius: 15, padding: 12, marginTop: 13, flexDirection: "row", alignItems: "center", gap: 10 },
   noticeText: { flex: 1, fontSize: 10, lineHeight: 15, fontFamily: "Inter_400Regular" },
+  planSessionNotice: { minHeight: 54, borderWidth: 1, borderRadius: 13, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 10, flexDirection: "row", alignItems: "center", gap: 9 },
+  paymentSessionNotice: { minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 10, flexDirection: "row", alignItems: "center", gap: 8 },
+  planSessionCopy: { flex: 1, gap: 3 },
+  planSessionTitle: { fontSize: 9, fontFamily: "Inter_600SemiBold" },
+  planSessionText: { fontSize: 8, lineHeight: 12, fontFamily: "Inter_400Regular" },
+  planSessionRetry: { paddingHorizontal: 8, paddingVertical: 7 },
+  planSessionRetryText: { fontSize: 9, fontFamily: "Inter_700Bold" },
   activityCard: { borderWidth: 1, borderRadius: 18, padding: 15, marginBottom: 12 },
   activityHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
   activityTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
