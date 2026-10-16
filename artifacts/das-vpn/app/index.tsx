@@ -16,11 +16,13 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Crypto from "expo-crypto";
 import * as Haptics from "expo-haptics";
 import Animated, {
+  FadeInDown,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -40,6 +42,7 @@ import { useColors } from "@/hooks/useColors";
 import {
   getSessionValue,
   RECOVERY_KEY,
+  RECOVERY_PIN_KEY,
   RECOVERY_SEEN_KEY,
   setSessionValue,
   TOKEN_KEY,
@@ -54,7 +57,8 @@ const navigation = [
 
 type Tab = (typeof navigation)[number]["key"];
 type PaymentFlow = "input" | "processing" | "success" | "issue";
-type ActivityFilter = "all" | "payments" | "subscriptions" | "connection";
+type ActivityFilter = "all" | "payments" | "subscriptions";
+type RecoveryStep = "setup" | "confirm" | "unlock" | "key" | "restore";
 
 function randomHex(byteCount: number): Promise<string> {
   return Crypto.getRandomBytesAsync(byteCount).then((bytes) =>
@@ -101,8 +105,11 @@ function formatActivityTime(value: string): string {
 function activityTitle(type: string, status: string): string {
   if (type === "activation") return "Subscription Activated";
   if (type === "expiry") return "Subscription Expired";
-  if (status === "pending") return "STK Push Sent";
-  if (status === "paid") return "Payment Successful";
+  if (status === "pending") return "Payment in progress";
+  if (status === "paid") return "Payment successful";
+  if (status === "failed") return "Payment failed";
+  if (status === "cancelled") return "Payment cancelled";
+  if (status === "expired") return "Payment expired";
   return "Payment Update";
 }
 
@@ -111,6 +118,76 @@ function activityIcon(type: string, status: string): React.ComponentProps<typeof
   if (type === "expiry") return "clock";
   if (status === "pending") return "smartphone";
   return "credit-card";
+}
+
+function formatActivityClock(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleTimeString("en-KE", {
+    timeZone: "Africa/Nairobi",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function activityDayKey(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Nairobi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function activityDayLabel(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Earlier";
+  const key = activityDayKey(value);
+  const today = activityDayKey(new Date().toISOString());
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  if (key === today) return "Today";
+  if (key === activityDayKey(yesterday.toISOString())) return "Yesterday";
+  return date.toLocaleDateString("en-KE", {
+    timeZone: "Africa/Nairobi",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function activityStatusLabel(status: string): string {
+  if (status === "paid" || status === "active") return "Complete";
+  if (status === "pending") return "Pending";
+  if (status === "failed") return "Failed";
+  if (status === "cancelled") return "Cancelled";
+  if (status === "expired") return "Expired";
+  return "Updated";
+}
+
+async function saveRecoveryPin(pin: string): Promise<void> {
+  const salt = await randomHex(16);
+  const digest = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    `${salt}:${pin}`,
+  );
+  await setSessionValue(RECOVERY_PIN_KEY, `${salt}:${digest}`);
+}
+
+async function verifyRecoveryPin(pin: string): Promise<boolean> {
+  const record = await getSessionValue(RECOVERY_PIN_KEY);
+  if (!record) return false;
+  const separator = record.indexOf(":");
+  if (separator < 1) return false;
+  const salt = record.slice(0, separator);
+  const savedDigest = record.slice(separator + 1);
+  const attemptDigest = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    `${salt}:${pin}`,
+  );
+  return attemptDigest === savedDigest;
 }
 
 function formatAmount(amount: number): string {
@@ -168,6 +245,11 @@ export default function HomeScreen() {
   const [sessionMessage, setSessionMessage] = useState("");
   const [recoveryKey, setRecoveryKey] = useState("");
   const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryStep, setRecoveryStep] = useState<RecoveryStep>("restore");
+  const [recoveryPin, setRecoveryPin] = useState("");
+  const [pendingRecoveryPin, setPendingRecoveryPin] = useState("");
+  const [recoveryPinConfigured, setRecoveryPinConfigured] = useState(false);
+  const [recoveryPinError, setRecoveryPinError] = useState("");
   const [recoveryInput, setRecoveryInput] = useState("");
   const [recovering, setRecovering] = useState(false);
   const [selectedPlanCode, setSelectedPlanCode] = useState("");
@@ -192,12 +274,17 @@ export default function HomeScreen() {
   const scrollOffsetY = useRef(0);
 
   const aura = useSharedValue(0.55);
+  const orbit = useSharedValue(0);
   useEffect(() => {
     aura.value = withRepeat(withTiming(1, { duration: 2200 }), -1, true);
-  }, [aura]);
+    orbit.value = withRepeat(withTiming(1, { duration: 12000 }), -1, false);
+  }, [aura, orbit]);
   const auraStyle = useAnimatedStyle(() => ({
     opacity: 0.23 + aura.value * 0.28,
     transform: [{ scale: 0.94 + aura.value * 0.06 }],
+  }));
+  const orbitStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${orbit.value * 360}deg` }],
   }));
 
   const startDeviceSession = useCallback(async () => {
@@ -206,6 +293,8 @@ export default function HomeScreen() {
     try {
       const storedToken = await getSessionValue(TOKEN_KEY);
       const storedRecovery = await getSessionValue(RECOVERY_KEY);
+      const storedPin = await getSessionValue(RECOVERY_PIN_KEY);
+      setRecoveryPinConfigured(Boolean(storedPin));
       const isNewSession = !storedToken || !storedRecovery;
       const token = storedToken ?? await randomHex(32);
       const recovery = storedRecovery ?? await randomHex(32);
@@ -215,6 +304,7 @@ export default function HomeScreen() {
       }
       setRecoveryKey(recovery);
       if (isNewSession && (await getSessionValue(RECOVERY_SEEN_KEY)) !== "yes") {
+        setRecoveryStep(storedPin ? "unlock" : "setup");
         setShowRecovery(true);
       }
       await createVpnSession({ deviceToken: token, recoveryKey: recovery });
@@ -363,7 +453,14 @@ export default function HomeScreen() {
 
   useEffect(() => {
     const listener = AppState.addEventListener("change", (state) => {
-      if (state !== "active" || !sessionReady) return;
+      if (state !== "active") {
+        if (showRecovery && recoveryStep === "key") {
+          setShowRecovery(false);
+          setRecoveryStep("unlock");
+        }
+        return;
+      }
+      if (!sessionReady) return;
       void statusQuery.refetch();
       if (activeTab === "activity") void activityQuery.refetch();
       if (paymentLookupId) void paymentQuery.refetch();
@@ -374,14 +471,85 @@ export default function HomeScreen() {
     activityQuery.refetch,
     paymentLookupId,
     paymentQuery.refetch,
+    recoveryStep,
     sessionReady,
+    showRecovery,
     statusQuery.refetch,
   ]);
 
   const finishRecoveryNotice = async () => {
     await setSessionValue(RECOVERY_SEEN_KEY, "yes");
     setShowRecovery(false);
+    setRecoveryStep("unlock");
+    setRecoveryPin("");
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const openRecovery = () => {
+    setPaymentError("");
+    setRecoveryInput("");
+    setRecoveryPin("");
+    setPendingRecoveryPin("");
+    setRecoveryPinError("");
+    setRecoveryStep(recoveryKey ? (recoveryPinConfigured ? "unlock" : "setup") : "restore");
+    setShowRecovery(true);
+  };
+
+  const closeRecovery = () => {
+    Keyboard.dismiss();
+    setShowRecovery(false);
+    setRecoveryPin("");
+    setPendingRecoveryPin("");
+    setRecoveryPinError("");
+    setRecoveryStep(recoveryKey ? "unlock" : "restore");
+  };
+
+  const submitRecoveryPin = async () => {
+    Keyboard.dismiss();
+    setRecoveryPinError("");
+    if (!/^\d{4}$/.test(recoveryPin)) {
+      setRecoveryPinError("Enter all 4 digits to continue.");
+      return;
+    }
+
+    try {
+      if (recoveryStep === "setup") {
+        setPendingRecoveryPin(recoveryPin);
+        setRecoveryPin("");
+        setRecoveryStep("confirm");
+        return;
+      }
+
+      if (recoveryStep === "confirm") {
+        if (recoveryPin !== pendingRecoveryPin) {
+          setRecoveryPin("");
+          setRecoveryPinError("Those PINs don’t match. Try again.");
+          return;
+        }
+        await saveRecoveryPin(recoveryPin);
+        setRecoveryPinConfigured(true);
+        setRecoveryPin("");
+        setPendingRecoveryPin("");
+        setRecoveryStep("key");
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return;
+      }
+
+      if (recoveryStep === "unlock") {
+        if (await verifyRecoveryPin(recoveryPin)) {
+          setRecoveryPin("");
+          setRecoveryStep("key");
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } else {
+          setRecoveryPin("");
+          setRecoveryPinError("That PIN isn’t correct. Try again.");
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        }
+      }
+    } catch {
+      setRecoveryPin("");
+      setRecoveryPinError("The recovery PIN couldn’t be checked or saved securely. Please try again.");
+    }
   };
 
   const submitPayment = async () => {
@@ -471,6 +639,9 @@ export default function HomeScreen() {
       setRecoveryKey(nextRecovery);
       setRecoveryInput("");
       setSessionReady(true);
+      setRecoveryPin("");
+      setRecoveryPinError("");
+      setRecoveryStep(recoveryPinConfigured ? "unlock" : "setup");
       setShowRecovery(true);
       await statusQuery.refetch();
     } catch {
@@ -504,9 +675,25 @@ export default function HomeScreen() {
   const visibleActivities = allActivities.filter((item) => {
     if (activityFilter === "payments") return item.type === "payment";
     if (activityFilter === "subscriptions") return item.type === "activation" || item.type === "expiry";
-    if (activityFilter === "connection") return false;
     return true;
   });
+  const paymentEventCount = allActivities.filter((item) => item.type === "payment").length;
+  const subscriptionEventCount = allActivities.filter(
+    (item) => item.type === "activation" || item.type === "expiry",
+  ).length;
+  const activityGroups = new Map<string, {
+    label: string;
+    items: (typeof visibleActivities)[number][];
+  }>();
+  for (const item of visibleActivities) {
+    const key = activityDayKey(item.occurredAt);
+    const existingGroup = activityGroups.get(key);
+    if (existingGroup) {
+      existingGroup.items.push(item);
+    } else {
+      activityGroups.set(key, { label: activityDayLabel(item.occurredAt), items: [item] });
+    }
+  }
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -629,11 +816,7 @@ export default function HomeScreen() {
             </Pressable>
           ) : !paymentFlow && activeTab === "profile" ? (
             <Pressable
-              onPress={() => {
-                setPaymentError("");
-                setRecoveryInput("");
-                setShowRecovery(true);
-              }}
+              onPress={openRecovery}
               style={styles.headerAction}
               accessibilityRole="button"
               accessibilityLabel="Device recovery settings"
@@ -646,7 +829,7 @@ export default function HomeScreen() {
 
         {!paymentFlow && activeTab === "home" ? (
           <>
-            <View style={styles.homeHeroIntro}>
+            <Animated.View entering={FadeInDown.duration(380).delay(40)} style={styles.homeHeroIntro}>
               <Text style={[styles.homeHeadline, { color: colors.foreground }]}>
                 Your internet,{"\n"}
                 <Text style={{ color: colors.accent }}>without limits</Text>
@@ -674,9 +857,9 @@ export default function HomeScreen() {
                   {hasActiveSubscription ? "SUBSCRIPTION ACTIVE" : "CHOOSE A PLAN TO START"}
                 </Text>
               </View>
-            </View>
+            </Animated.View>
 
-            <View style={styles.homeOrbArea}>
+            <Animated.View entering={FadeInDown.duration(430).delay(100)} style={styles.homeOrbArea}>
               <Animated.View
                 style={[
                   styles.orbAura,
@@ -684,6 +867,16 @@ export default function HomeScreen() {
                   auraStyle,
                 ]}
               />
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.orbitTrack,
+                  { borderColor: colors.orbEdge },
+                  orbitStyle,
+                ]}
+              >
+                <View style={[styles.orbitDot, { backgroundColor: colors.accent }]} />
+              </Animated.View>
               <View
                 style={[
                   styles.orbRingOuter,
@@ -715,7 +908,8 @@ export default function HomeScreen() {
                   </View>
                 </LinearGradient>
               </View>
-            </View>
+            </Animated.View>
+            <Animated.View entering={FadeInDown.duration(400).delay(170)}>
             <Pressable
               onPress={() => setActiveTab(hasActiveSubscription ? "activity" : "plans")}
               style={({ pressed }) => [
@@ -748,8 +942,10 @@ export default function HomeScreen() {
               </View>
               <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
             </Pressable>
+            </Animated.View>
 
             {featuredPlan ? (
+            <Animated.View entering={FadeInDown.duration(420).delay(230)}>
             <Pressable
               onPress={() => startPaymentForPlan(featuredPlan.code)}
               style={({ pressed }) => [styles.homePromoCard, pressed ? styles.pressed : null]}
@@ -779,9 +975,10 @@ export default function HomeScreen() {
                 </View>
               </LinearGradient>
             </Pressable>
+            </Animated.View>
             ) : null}
 
-            <View style={[styles.sectionRow, styles.homePlansHeading]}>
+            <Animated.View entering={FadeInDown.duration(400).delay(280)} style={[styles.sectionRow, styles.homePlansHeading]}>
               <View>
                 <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Popular plans</Text>
                 <Text style={[styles.sectionSubcopy, { color: colors.mutedForeground }]}>
@@ -798,10 +995,10 @@ export default function HomeScreen() {
                 <Text style={[styles.actionLabel, { color: colors.primary }]}>See all</Text>
                 <Feather name="arrow-right" size={14} color={colors.primary} />
               </Pressable>
-            </View>
+            </Animated.View>
 
             {homePopularPlans.length ? (
-              <View style={styles.homePopularGrid}>
+              <Animated.View entering={FadeInDown.duration(420).delay(330)} style={styles.homePopularGrid}>
                 {homePopularPlans.map((plan) => (
                   <Pressable
                     key={plan.code}
@@ -829,7 +1026,7 @@ export default function HomeScreen() {
                     <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
                   </Pressable>
                 ))}
-              </View>
+              </Animated.View>
             ) : plansQuery.isLoading ? (
               <View style={styles.homePlansLoading}>
                 <ActivityIndicator color={colors.primary} />
@@ -843,6 +1040,7 @@ export default function HomeScreen() {
               </View>
             )}
 
+            <Animated.View entering={FadeInDown.duration(420).delay(390)}>
             <Pressable
               onPress={() => void openSupport()}
               style={({ pressed }) => [
@@ -866,6 +1064,7 @@ export default function HomeScreen() {
               <Text style={[styles.homeSupportAction, { color: colors.primary }]}>Chat</Text>
               <Feather name="arrow-up-right" size={15} color={colors.primary} />
             </Pressable>
+            </Animated.View>
 
             {sessionMessage || statusQuery.isError || plansQuery.isError ? (
               <InlineError
@@ -1226,12 +1425,42 @@ export default function HomeScreen() {
 
         {!paymentFlow && activeTab === "activity" ? (
           <>
+            <Animated.View entering={FadeInDown.duration(360).delay(30)} style={styles.activityIntro}>
+              <Text style={[styles.activityEyebrow, { color: colors.accent }]}>ACCOUNT TIMELINE</Text>
+              <Text style={[styles.activityHeading, { color: colors.foreground }]}>Your history</Text>
+              <Text style={[styles.activitySubtitle, { color: colors.mutedForeground }]}>
+                Payments and plan changes, organized in one place.
+              </Text>
+            </Animated.View>
+
+            <View style={styles.activitySummaryGrid}>
+              <View style={[styles.activitySummaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={styles.activitySummaryHeader}>
+                  <IconTile icon="credit-card" color={colors.primary} background={colors.iconSurface} size={16} />
+                  <Text style={[styles.activitySummaryLabel, { color: colors.mutedForeground }]}>PAYMENTS</Text>
+                </View>
+                <Text style={[styles.activitySummaryValue, { color: colors.foreground }]}>
+                  {activityQuery.isLoading ? "—" : paymentEventCount}
+                </Text>
+                <Text style={[styles.activitySummaryCopy, { color: colors.mutedForeground }]}>Recorded transactions</Text>
+              </View>
+              <View style={[styles.activitySummaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={styles.activitySummaryHeader}>
+                  <IconTile icon="shield" color={colors.success} background={colors.successSurface} size={16} />
+                  <Text style={[styles.activitySummaryLabel, { color: colors.mutedForeground }]}>PLAN CHANGES</Text>
+                </View>
+                <Text style={[styles.activitySummaryValue, { color: colors.foreground }]}>
+                  {activityQuery.isLoading ? "—" : subscriptionEventCount}
+                </Text>
+                <Text style={[styles.activitySummaryCopy, { color: colors.mutedForeground }]}>Activations and expiries</Text>
+              </View>
+            </View>
+
             <View style={styles.activityFilters}>
               {[
                 { key: "all", label: "All" },
                 { key: "payments", label: "Payments" },
-                { key: "subscriptions", label: "Subscriptions" },
-                { key: "connection", label: "Connection" },
+                { key: "subscriptions", label: "Plan changes" },
               ].map((filter) => {
                 const selected = activityFilter === filter.key;
                 return (
@@ -1240,13 +1469,16 @@ export default function HomeScreen() {
                     onPress={() => setActivityFilter(filter.key as ActivityFilter)}
                     style={[
                       styles.activityFilter,
-                      { backgroundColor: selected ? colors.accent : colors.card },
+                      {
+                        backgroundColor: selected ? colors.accent : colors.card,
+                        borderColor: selected ? colors.accent : colors.border,
+                      },
                     ]}
                     accessibilityRole="button"
                     accessibilityState={{ selected }}
                     testID={`activity-filter-${filter.key}`}
                   >
-                    <Text style={[styles.activityFilterText, { color: selected ? "#ffffff" : colors.mutedForeground }]}>
+                    <Text style={[styles.activityFilterText, { color: selected ? colors.primaryForeground : colors.mutedForeground }]}>
                       {filter.label}
                     </Text>
                   </Pressable>
@@ -1265,71 +1497,87 @@ export default function HomeScreen() {
                 onRetry={() => void activityQuery.refetch()}
                 colors={colors}
               />
-            ) : (
-              <View style={[styles.activityFeed, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                {visibleActivities.length ? (
-                  visibleActivities.map((item, index) => (
-                    <View
-                      key={item.id}
-                      style={[
-                        styles.activityFeedRow,
-                        index > 0 ? { borderTopColor: colors.border, borderTopWidth: 1 } : null,
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.activityEventIcon,
-                          {
-                            backgroundColor:
-                              item.status === "paid" || item.status === "active"
-                                ? colors.successSurface
-                                : item.status === "pending"
-                                  ? colors.pendingSurface
-                                  : colors.iconSurface,
-                          },
-                        ]}
-                      >
-                        <Feather
-                          name={activityIcon(item.type, item.status)}
-                          size={16}
-                          color={
-                            item.status === "paid" || item.status === "active"
-                              ? colors.success
-                              : item.status === "pending"
-                                ? colors.accent
-                                : colors.mutedForeground
-                          }
-                        />
-                      </View>
-                      <View style={styles.activityEventCopy}>
-                        <Text style={[styles.rowTitle, { color: colors.foreground }]}>
-                          {activityTitle(item.type, item.status)}
-                        </Text>
-                        <Text style={[styles.smallCopy, { color: colors.mutedForeground }]} numberOfLines={1}>
-                          {item.planLabel}
-                          {item.type === "payment" ? ` · KES ${formatAmount(item.amountKes)}` : ""}
-                        </Text>
-                      </View>
-                      <Text style={[styles.activityTime, { color: colors.mutedForeground }]}>
-                        {formatActivityTime(item.occurredAt)}
+            ) : visibleActivities.length ? (
+              <View style={styles.activityGroups}>
+                {Array.from(activityGroups.values()).map((group) => (
+                  <View key={activityDayKey(group.items[0]?.occurredAt ?? "")}>
+                    <View style={styles.activityDayHeading}>
+                      <Text style={[styles.activityDayTitle, { color: colors.foreground }]}>{group.label}</Text>
+                      <Text style={[styles.activityDayCount, { color: colors.mutedForeground }]}>
+                        {group.items.length} {group.items.length === 1 ? "event" : "events"}
                       </Text>
                     </View>
-                  ))
-                ) : (
-                  <View style={styles.emptyActivity}>
-                    <View style={[styles.emptyActivityIcon, { backgroundColor: colors.iconSurface }]}>
-                      <Feather name={activityFilter === "connection" ? "wifi" : "clock"} size={20} color={colors.accent} />
+                    <View
+                      style={[styles.activityFeed, { backgroundColor: colors.card, borderColor: colors.border }]}
+                      testID="activity-feed"
+                    >
+                      {group.items.map((item, index) => {
+                        const isSuccess = item.status === "paid" || item.status === "active";
+                        const isPending = item.status === "pending";
+                        const isFailure = ["failed", "cancelled", "expired"].includes(item.status);
+                        const statusColor = isSuccess
+                          ? colors.success
+                          : isPending
+                            ? colors.accent
+                            : isFailure
+                              ? colors.destructive
+                              : colors.mutedForeground;
+                        const statusSurface = isSuccess
+                          ? colors.successSurface
+                          : isPending
+                            ? colors.pendingSurface
+                            : colors.iconSurface;
+                        return (
+                          <Animated.View
+                            key={item.id}
+                            entering={FadeInDown.duration(300).delay(Math.min(index * 45, 270))}
+                            style={[
+                              styles.activityFeedRow,
+                              index > 0 ? { borderTopColor: colors.border, borderTopWidth: 1 } : null,
+                            ]}
+                          >
+                            <View style={[styles.activityEventIcon, { backgroundColor: statusSurface }]}>
+                              <Feather name={activityIcon(item.type, item.status)} size={17} color={statusColor} />
+                            </View>
+                            <View style={styles.activityEventCopy}>
+                              <Text style={[styles.activityEventTitle, { color: colors.foreground }]}>
+                                {activityTitle(item.type, item.status)}
+                              </Text>
+                              <Text style={[styles.activityEventDescription, { color: colors.mutedForeground }]} numberOfLines={1}>
+                                {item.planLabel}
+                                {item.type === "payment" ? ` · KES ${formatAmount(item.amountKes)}` : ""}
+                              </Text>
+                            </View>
+                            <View style={styles.activityMeta}>
+                              <Text style={[styles.activityTime, { color: colors.mutedForeground }]}>
+                                {formatActivityClock(item.occurredAt)}
+                              </Text>
+                              <View style={[styles.activityStatusBadge, { backgroundColor: statusSurface }]}>
+                                <Text style={[styles.activityStatusText, { color: statusColor }]}>
+                                  {activityStatusLabel(item.status)}
+                                </Text>
+                              </View>
+                            </View>
+                          </Animated.View>
+                        );
+                      })}
                     </View>
-                    <Text style={[styles.rowTitle, { color: colors.foreground }]}>
-                      {activityFilter === "connection" ? "No connection events" : "No activity yet"}
-                    </Text>
-                    <Text style={[styles.smallCopy, styles.centered, { color: colors.mutedForeground }]}>
-                      {activityFilter === "connection"
-                        ? "Connection history will appear once a live VPN tunnel is available."
-                        : "Payments and subscription events will appear here once recorded."}
-                    </Text>
                   </View>
-                )}
+                ))}
+              </View>
+            ) : (
+              <View style={[styles.emptyActivityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={[styles.emptyActivityIcon, { backgroundColor: colors.iconSurface }]}>
+                  <Feather name="clock" size={21} color={colors.accent} />
+                </View>
+                <Text style={[styles.emptyActivityTitle, { color: colors.foreground }]}>
+                  {activityFilter === "all" ? "Your history starts here" : "Nothing in this category yet"}
+                </Text>
+                <Text style={[styles.emptyActivityCopy, { color: colors.mutedForeground }]}>
+                  {activityFilter === "all"
+                    ? "Payments and subscription changes will appear here once recorded."
+                    : "Try another filter or check back after your next account update."}
+                </Text>
               </View>
             )}
             {paymentFlow === null && paymentId && paymentQuery.isError ? (
@@ -1414,11 +1662,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <Pressable
-              onPress={() => {
-                setPaymentError("");
-                setRecoveryInput("");
-                setShowRecovery(true);
-              }}
+              onPress={openRecovery}
               style={[styles.recoveryButton, { backgroundColor: colors.card, borderColor: colors.border }]}
               accessibilityRole="button"
               testID="profile-recovery"
@@ -1468,62 +1712,126 @@ export default function HomeScreen() {
         })}
       </View>
 
-      <Modal visible={showRecovery} transparent animationType="fade" onRequestClose={() => setShowRecovery(false)}>
+      <Modal visible={showRecovery} transparent animationType="fade" onRequestClose={closeRecovery}>
         <View style={styles.modalScrim}>
-          <View style={[styles.recoverySheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={[styles.recoveryIcon, { backgroundColor: colors.iconSurface }]}>
-              <Feather name="key" size={21} color={colors.accent} />
+          <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} style={styles.recoveryKeyboard}>
+            <View style={[styles.recoverySheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={[styles.recoveryIcon, { backgroundColor: colors.iconSurface }]}>
+                <Feather name={recoveryKey && recoveryStep !== "restore" ? "lock" : "key"} size={21} color={colors.accent} />
+              </View>
+              {recoveryKey && recoveryStep === "key" ? (
+                <>
+                  <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Save your recovery key</Text>
+                  <Text style={[styles.recoveryDescription, { color: colors.mutedForeground }]}>
+                    This key restores your subscription if you change or reinstall your device. Keep it private. It rotates after recovery.
+                  </Text>
+                  <Text selectable style={[styles.recoveryCode, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]} testID="recovery-key">
+                    {recoveryKey.match(/.{1,8}/g)?.join(" ") ?? recoveryKey}
+                  </Text>
+                  <Pressable onPress={() => void finishRecoveryNotice()} style={styles.primaryButton} accessibilityRole="button" testID="recovery-saved">
+                    <LinearGradient colors={[colors.primary, colors.accent]} style={styles.primaryButtonGradient}>
+                      <Text style={styles.primaryButtonText}>I saved this key</Text>
+                    </LinearGradient>
+                  </Pressable>
+                </>
+              ) : recoveryKey ? (
+                <>
+                  <Text style={[styles.sheetTitle, { color: colors.foreground }]}>
+                    {recoveryStep === "setup"
+                      ? "Create a 4-digit PIN"
+                      : recoveryStep === "confirm"
+                        ? "Confirm your PIN"
+                        : "Unlock your recovery key"}
+                  </Text>
+                  <Text style={[styles.recoveryDescription, { color: colors.mutedForeground }]}>
+                    {recoveryStep === "setup"
+                      ? "Choose a PIN you can remember. You’ll enter it each time you reveal this key."
+                      : recoveryStep === "confirm"
+                        ? "Enter the same 4 digits once more to finish protecting your key."
+                        : "Enter your 4-digit PIN to reveal the recovery key on this device."}
+                  </Text>
+                  <TextInput
+                    value={recoveryPin}
+                    onChangeText={(value) => {
+                      setRecoveryPin(value.replace(/\D/g, "").slice(0, 4));
+                      if (recoveryPinError) setRecoveryPinError("");
+                    }}
+                    placeholder="••••"
+                    placeholderTextColor={colors.placeholder}
+                    keyboardType="number-pad"
+                    secureTextEntry
+                    autoComplete="off"
+                    maxLength={4}
+                    returnKeyType="done"
+                    onSubmitEditing={() => void submitRecoveryPin()}
+                    style={[styles.recoveryPinInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+                    accessibilityLabel={
+                      recoveryStep === "confirm"
+                        ? "Confirm four digit recovery PIN"
+                        : recoveryStep === "unlock"
+                          ? "Enter recovery PIN"
+                          : "Create four digit recovery PIN"
+                    }
+                    testID="recovery-pin-input"
+                  />
+                  {recoveryPinError ? (
+                    <Text accessibilityLiveRegion="polite" style={[styles.formErrorText, { color: colors.destructive }]}>
+                      {recoveryPinError}
+                    </Text>
+                  ) : null}
+                  <Pressable
+                    onPress={() => void submitRecoveryPin()}
+                    disabled={recoveryPin.length !== 4}
+                    style={[styles.primaryButton, { opacity: recoveryPin.length === 4 ? 1 : 0.55 }]}
+                    accessibilityRole="button"
+                    testID="recovery-pin-submit"
+                  >
+                    <LinearGradient colors={[colors.primary, colors.accent]} style={styles.primaryButtonGradient}>
+                      <Text style={styles.primaryButtonText}>
+                        {recoveryStep === "setup" ? "Continue" : recoveryStep === "confirm" ? "Set PIN" : "Unlock key"}
+                      </Text>
+                    </LinearGradient>
+                  </Pressable>
+                  <Pressable onPress={closeRecovery} style={styles.dismissRecovery} accessibilityRole="button" testID="recovery-dismiss">
+                    <Text style={[styles.quietButtonText, { color: colors.mutedForeground }]}>Close</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Restore access</Text>
+                  <Text style={[styles.recoveryDescription, { color: colors.mutedForeground }]}>
+                    Enter the recovery key saved on your previous device. No account or phone lookup is used.
+                  </Text>
+                  <TextInput
+                    value={recoveryInput}
+                    onChangeText={setRecoveryInput}
+                    placeholder="64-character recovery key"
+                    placeholderTextColor={colors.placeholder}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[styles.recoveryInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+                    accessibilityLabel="Recovery key"
+                    testID="recovery-input"
+                  />
+                  {paymentError ? <Text style={[styles.formErrorText, { color: colors.destructive }]}>{paymentError}</Text> : null}
+                  <Pressable
+                    onPress={() => void recoverDevice()}
+                    disabled={recovering}
+                    style={[styles.primaryButton, { opacity: recovering ? 0.65 : 1 }]}
+                    accessibilityRole="button"
+                    testID="recovery-submit"
+                  >
+                    <LinearGradient colors={[colors.primary, colors.accent]} style={styles.primaryButtonGradient}>
+                      {recovering ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.primaryButtonText}>Restore this device</Text>}
+                    </LinearGradient>
+                  </Pressable>
+                  <Pressable onPress={closeRecovery} style={styles.dismissRecovery} accessibilityRole="button" testID="recovery-dismiss">
+                    <Text style={[styles.quietButtonText, { color: colors.mutedForeground }]}>Close</Text>
+                  </Pressable>
+                </>
+              )}
             </View>
-            {recoveryKey ? (
-              <>
-                <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Save your recovery key</Text>
-                <Text style={[styles.recoveryDescription, { color: colors.mutedForeground }]}>
-                  This key restores your subscription if you change or reinstall your device. Keep it private. It rotates after recovery.
-                </Text>
-                <Text selectable style={[styles.recoveryCode, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]} testID="recovery-key">
-                  {recoveryKey.match(/.{1,8}/g)?.join(" ") ?? recoveryKey}
-                </Text>
-                <Pressable onPress={() => void finishRecoveryNotice()} style={styles.primaryButton} accessibilityRole="button" testID="recovery-saved">
-                  <LinearGradient colors={[colors.primary, colors.accent]} style={styles.primaryButtonGradient}>
-                    <Text style={styles.primaryButtonText}>I saved this key</Text>
-                  </LinearGradient>
-                </Pressable>
-              </>
-            ) : (
-              <>
-                <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Restore access</Text>
-                <Text style={[styles.recoveryDescription, { color: colors.mutedForeground }]}>
-                  Enter the recovery key saved on your previous device. No account or phone lookup is used.
-                </Text>
-                <TextInput
-                  value={recoveryInput}
-                  onChangeText={setRecoveryInput}
-                  placeholder="64-character recovery key"
-                  placeholderTextColor={colors.placeholder}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  style={[styles.recoveryInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
-                  accessibilityLabel="Recovery key"
-                  testID="recovery-input"
-                />
-                {paymentError ? <Text style={[styles.formErrorText, { color: colors.destructive }]}>{paymentError}</Text> : null}
-                <Pressable
-                  onPress={() => void recoverDevice()}
-                  disabled={recovering}
-                  style={[styles.primaryButton, { opacity: recovering ? 0.65 : 1 }]}
-                  accessibilityRole="button"
-                  testID="recovery-submit"
-                >
-                  <LinearGradient colors={[colors.primary, colors.accent]} style={styles.primaryButtonGradient}>
-                    {recovering ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.primaryButtonText}>Restore this device</Text>}
-                  </LinearGradient>
-                </Pressable>
-                <Pressable onPress={() => setShowRecovery(false)} style={styles.dismissRecovery} accessibilityRole="button" testID="recovery-dismiss">
-                  <Text style={[styles.quietButtonText, { color: colors.mutedForeground }]}>Close</Text>
-                </Pressable>
-              </>
-            )}
-          </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>
@@ -1566,6 +1874,8 @@ const styles = StyleSheet.create({
   homeStatusPillText: { fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
   homeOrbArea: { height: 190, alignItems: "center", justifyContent: "center", marginTop: 0, marginBottom: 0 },
   orbAura: { position: "absolute", height: 178, width: 178, borderRadius: 90 },
+  orbitTrack: { position: "absolute", top: 18, alignSelf: "center", width: 154, height: 154, borderRadius: 80, borderWidth: 1, alignItems: "center", justifyContent: "flex-start" },
+  orbitDot: { width: 8, height: 8, borderRadius: 4, marginTop: -4 },
   orbRingOuter: { width: 174, height: 174, borderRadius: 90, borderWidth: 2, alignItems: "center", justifyContent: "center", shadowOpacity: 0.4, shadowRadius: 24, elevation: 8 },
   orb: { height: 158, width: 158, borderRadius: 80, overflow: "hidden" },
   orbInner: { flex: 1, alignItems: "center", justifyContent: "center", gap: 6 },
@@ -1698,19 +2008,40 @@ const styles = StyleSheet.create({
   emptySubscription: { marginTop: 13, flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 },
   activityList: { marginTop: 9 },
   activityItem: { borderTopWidth: 1, paddingTop: 12, paddingBottom: 10, flexDirection: "row", alignItems: "center", gap: 10 },
-  activityFilters: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 15 },
-  activityFilter: { minHeight: 29, paddingHorizontal: 11, borderRadius: 15, alignItems: "center", justifyContent: "center" },
-  activityFilterText: { fontSize: 8, fontWeight: "600" },
-  activityFeed: { borderWidth: 1, borderRadius: 15, overflow: "hidden" },
-  activityFeedRow: { minHeight: 58, paddingHorizontal: 10, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 9 },
-  activityEventIcon: { width: 31, height: 31, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  activityIntro: { marginTop: 4, marginBottom: 16 },
+  activityEyebrow: { fontSize: 9, letterSpacing: 1.4, fontWeight: "700" },
+  activityHeading: { fontSize: 26, lineHeight: 31, fontWeight: "700", letterSpacing: -0.7, marginTop: 5 },
+  activitySubtitle: { fontSize: 11, lineHeight: 16, marginTop: 4 },
+  activitySummaryGrid: { flexDirection: "row", gap: 10, marginBottom: 18 },
+  activitySummaryCard: { flex: 1, minHeight: 112, borderWidth: 1, borderRadius: 17, padding: 12 },
+  activitySummaryHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  activitySummaryLabel: { fontSize: 8, fontWeight: "700", letterSpacing: 0.8 },
+  activitySummaryValue: { fontSize: 24, lineHeight: 29, fontWeight: "700", marginTop: 9 },
+  activitySummaryCopy: { fontSize: 9, lineHeight: 13, marginTop: 1 },
+  activityFilters: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 18 },
+  activityFilter: { minHeight: 35, paddingHorizontal: 14, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  activityFilterText: { fontSize: 10, fontWeight: "600" },
+  activityGroups: { gap: 18 },
+  activityDayHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8, paddingHorizontal: 2 },
+  activityDayTitle: { fontSize: 14, fontWeight: "700" },
+  activityDayCount: { fontSize: 9, fontWeight: "500" },
+  activityFeed: { borderWidth: 1, borderRadius: 16, overflow: "hidden" },
+  activityFeedRow: { minHeight: 72, paddingHorizontal: 12, paddingVertical: 11, flexDirection: "row", alignItems: "center", gap: 10 },
+  activityEventIcon: { width: 38, height: 38, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   activityEventCopy: { flex: 1, minWidth: 0 },
-  activityTime: { fontSize: 7, lineHeight: 11, textAlign: "right", maxWidth: 68 },
+  activityEventTitle: { fontSize: 12, lineHeight: 17, fontWeight: "600" },
+  activityEventDescription: { fontSize: 10, lineHeight: 14, marginTop: 2 },
+  activityMeta: { width: 72, alignItems: "flex-end", gap: 5 },
+  activityTime: { fontSize: 9, lineHeight: 12, textAlign: "right" },
+  activityStatusBadge: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 4 },
+  activityStatusText: { fontSize: 8, fontWeight: "700" },
   statusTag: { borderRadius: 7, paddingHorizontal: 7, paddingVertical: 5 },
   statusTagText: { fontSize: 8, fontWeight: "700" },
-  activitySkeleton: { height: 58, borderRadius: 12, marginTop: 8 },
-  emptyActivity: { alignItems: "center", paddingHorizontal: 12, paddingVertical: 23 },
-  emptyActivityIcon: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center", marginBottom: 11 },
+  activitySkeleton: { height: 70, borderRadius: 12, marginTop: 8 },
+  emptyActivityCard: { borderWidth: 1, borderRadius: 18, minHeight: 200, alignItems: "center", justifyContent: "center", padding: 24, gap: 9 },
+  emptyActivityIcon: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" },
+  emptyActivityTitle: { fontSize: 13, lineHeight: 18, fontWeight: "700", textAlign: "center" },
+  emptyActivityCopy: { fontSize: 10, lineHeight: 15, textAlign: "center", maxWidth: 270 },
   errorPanel: { borderWidth: 1, borderRadius: 14, padding: 12, flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12 },
   errorTitle: { fontSize: 11, fontWeight: "700", marginBottom: 2 },
   profileCard: { borderWidth: 1, borderRadius: 15, padding: 12, marginBottom: 11 },
@@ -1727,11 +2058,13 @@ const styles = StyleSheet.create({
   navIconActive: { width: 34, height: 24, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   navLabel: { fontSize: 8, fontWeight: "600" },
   modalScrim: { flex: 1, backgroundColor: "rgba(2, 6, 18, 0.82)", justifyContent: "center", padding: 21 },
+  recoveryKeyboard: { flex: 1, justifyContent: "center" },
   recoverySheet: { borderWidth: 1, borderRadius: 22, padding: 20, width: "100%", maxWidth: 440, alignSelf: "center" },
   recoveryIcon: { width: 44, height: 44, borderRadius: 15, alignItems: "center", justifyContent: "center", marginBottom: 15 },
   sheetTitle: { fontSize: 19, fontWeight: "700", marginBottom: 8 },
   recoveryDescription: { fontSize: 11, lineHeight: 17, marginBottom: 15 },
   recoveryCode: { borderWidth: 1, borderRadius: 12, padding: 13, fontSize: 10, lineHeight: 20, letterSpacing: 0.5, marginBottom: 14, fontWeight: "600" },
   recoveryInput: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, minHeight: 48, fontSize: 12, marginBottom: 11 },
+  recoveryPinInput: { borderWidth: 1, borderRadius: 12, minHeight: 58, paddingHorizontal: 15, textAlign: "center", fontSize: 22, letterSpacing: 10, fontWeight: "700", marginBottom: 11 },
   dismissRecovery: { alignItems: "center", padding: 12 },
 });

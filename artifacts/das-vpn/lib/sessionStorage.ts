@@ -3,6 +3,7 @@ import * as SecureStore from "expo-secure-store";
 
 export const TOKEN_KEY = "das.vpn.device-token";
 export const RECOVERY_KEY = "das.vpn.recovery-key";
+export const RECOVERY_PIN_KEY = "das.vpn.recovery-pin";
 export const RECOVERY_SEEN_KEY = "das.vpn.recovery-viewed";
 
 function getBrowserStorage(): Storage {
