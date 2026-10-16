@@ -44,15 +44,23 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android platform tools
+      - name: Configure Android SDK
         run: |
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          sdkmanager_path="$(find "$sdk_root/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -n 1)"
+          if [ -z "$sdkmanager_path" ]; then
+            echo "Android SDK manager was not found in $sdk_root." >&2
+            exit 1
+          fi
+          export ANDROID_HOME="$sdk_root"
+          export ANDROID_SDK_ROOT="$sdk_root"
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          echo "$sdk_root/platform-tools" >> "$GITHUB_PATH"
           set +o pipefail
-          yes | sdkmanager --licenses >/dev/null
+          yes | "$sdkmanager_path" --licenses >/dev/null
           set -o pipefail
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          "$sdkmanager_path" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
