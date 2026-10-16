@@ -47,6 +47,7 @@ import {
   setSessionValue,
   TOKEN_KEY,
 } from "@/lib/sessionStorage";
+import { syncVpnStatusNotification } from "@/lib/vpnStatusNotification";
 
 const navigation = [
   { key: "home", label: "Home", icon: "home" },
@@ -275,16 +276,21 @@ export default function HomeScreen() {
 
   const aura = useSharedValue(0.55);
   const orbit = useSharedValue(0);
+  const float = useSharedValue(0);
   useEffect(() => {
     aura.value = withRepeat(withTiming(1, { duration: 2200 }), -1, true);
-    orbit.value = withRepeat(withTiming(1, { duration: 12000 }), -1, false);
-  }, [aura, orbit]);
+    orbit.value = withRepeat(withTiming(1, { duration: 8400 }), -1, false);
+    float.value = withRepeat(withTiming(1, { duration: 1800 }), -1, true);
+  }, [aura, float, orbit]);
   const auraStyle = useAnimatedStyle(() => ({
     opacity: 0.23 + aura.value * 0.28,
     transform: [{ scale: 0.94 + aura.value * 0.06 }],
   }));
   const orbitStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${orbit.value * 360}deg` }],
+  }));
+  const orbFloatStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: float.value * -6 }],
   }));
 
   const startDeviceSession = useCallback(async () => {
@@ -381,6 +387,9 @@ export default function HomeScreen() {
   const currentPlan = plans.find((plan) => plan.code === selectedPlanCode);
   const subscription = statusQuery.data?.subscription ?? null;
   const nativeTunnelConnected = Boolean(statusQuery.data?.nativeTunnel?.connected);
+  useEffect(() => {
+    void syncVpnStatusNotification(nativeTunnelConnected);
+  }, [nativeTunnelConnected]);
   const hasActiveSubscription = Boolean(
     subscription?.expiresAt && new Date(subscription.expiresAt).getTime() > Date.now(),
   );
@@ -877,10 +886,11 @@ export default function HomeScreen() {
               >
                 <View style={[styles.orbitDot, { backgroundColor: colors.accent }]} />
               </Animated.View>
-              <View
+              <Animated.View
                 style={[
                   styles.orbRingOuter,
                   { borderColor: hasActiveSubscription ? colors.orbEdge : colors.border },
+                  orbFloatStyle,
                 ]}
               >
                 <LinearGradient
@@ -907,7 +917,7 @@ export default function HomeScreen() {
                     </Text>
                   </View>
                 </LinearGradient>
-              </View>
+              </Animated.View>
             </Animated.View>
             <Animated.View entering={FadeInDown.duration(400).delay(170)}>
             <Pressable
@@ -1665,10 +1675,23 @@ export default function HomeScreen() {
               onPress={openRecovery}
               style={[styles.recoveryButton, { backgroundColor: colors.card, borderColor: colors.border }]}
               accessibilityRole="button"
+              accessibilityLabel={
+                recoveryPinConfigured
+                  ? "Recovery key protection. PIN is enabled. Tap to reveal your key."
+                  : "Recovery key protection. Set a 4-digit PIN to protect your recovery key."
+              }
               testID="profile-recovery"
             >
-              <Feather name="key" size={17} color={colors.foreground} />
-              <Text style={[styles.rowTitle, { color: colors.foreground }]}>Device Recovery</Text>
+              <Feather name="lock" size={17} color={colors.foreground} />
+              <View style={styles.flexOne}>
+                <Text style={[styles.rowTitle, { color: colors.foreground }]}>Recovery key protection</Text>
+                <Text style={[styles.smallCopy, { color: colors.mutedForeground }]}>
+                  {recoveryPinConfigured
+                    ? "PIN protection is on · Tap to reveal your key"
+                    : "Set a 4-digit PIN to protect your recovery key"}
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
             </Pressable>
             {sessionMessage ? (
               <InlineError message={sessionMessage} onRetry={() => void startDeviceSession()} colors={colors} />
@@ -2052,7 +2075,7 @@ const styles = StyleSheet.create({
   profileMenu: { borderWidth: 1, borderRadius: 15, paddingHorizontal: 13, marginBottom: 14 },
   profileMenuRow: { minHeight: 59, flexDirection: "row", alignItems: "center", gap: 11 },
   profileMenuDivider: { height: 1, marginLeft: 29 },
-  recoveryButton: { minHeight: 48, borderWidth: 1, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  recoveryButton: { minHeight: 60, borderWidth: 1, borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 9, gap: 11 },
   bottomNav: { minHeight: 60, borderTopWidth: 1, paddingTop: 7, flexDirection: "row", justifyContent: "space-around", alignItems: "flex-start" },
   navButton: { flex: 1, alignItems: "center", justifyContent: "center", gap: 3, minHeight: 45 },
   navIconActive: { width: 34, height: 24, borderRadius: 10, alignItems: "center", justifyContent: "center" },
