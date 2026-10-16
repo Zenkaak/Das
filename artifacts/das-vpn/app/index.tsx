@@ -276,18 +276,29 @@ export default function HomeScreen() {
 
   const aura = useSharedValue(0.55);
   const orbit = useSharedValue(0);
+  const outerOrbit = useSharedValue(0);
+  const signalWave = useSharedValue(0);
   const float = useSharedValue(0);
   useEffect(() => {
     aura.value = withRepeat(withTiming(1, { duration: 2200 }), -1, true);
     orbit.value = withRepeat(withTiming(1, { duration: 8400 }), -1, false);
+    outerOrbit.value = withRepeat(withTiming(1, { duration: 11800 }), -1, false);
+    signalWave.value = withRepeat(withTiming(1, { duration: 2600 }), -1, false);
     float.value = withRepeat(withTiming(1, { duration: 1800 }), -1, true);
-  }, [aura, float, orbit]);
+  }, [aura, float, orbit, outerOrbit, signalWave]);
   const auraStyle = useAnimatedStyle(() => ({
     opacity: 0.23 + aura.value * 0.28,
     transform: [{ scale: 0.94 + aura.value * 0.06 }],
   }));
   const orbitStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${orbit.value * 360}deg` }],
+  }));
+  const outerOrbitStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${outerOrbit.value * -360}deg` }],
+  }));
+  const signalWaveStyle = useAnimatedStyle(() => ({
+    opacity: 0.28 * (1 - signalWave.value),
+    transform: [{ scale: 0.91 + signalWave.value * 0.17 }],
   }));
   const orbFloatStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: float.value * -6 }],
@@ -879,6 +890,24 @@ export default function HomeScreen() {
               <Animated.View
                 pointerEvents="none"
                 style={[
+                  styles.orbPulseRing,
+                  { borderColor: hasActiveSubscription ? colors.orbEdge : colors.accent },
+                  signalWaveStyle,
+                ]}
+              />
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.orbitTrackWide,
+                  { borderColor: colors.border },
+                  outerOrbitStyle,
+                ]}
+              >
+                <View style={[styles.orbitDotWide, { backgroundColor: colors.success }]} />
+              </Animated.View>
+              <Animated.View
+                pointerEvents="none"
+                style={[
                   styles.orbitTrack,
                   { borderColor: colors.orbEdge },
                   orbitStyle,
@@ -935,19 +964,25 @@ export default function HomeScreen() {
               testID="open-plans"
             >
               <IconTile
-                icon={hasActiveSubscription ? "check" : "calendar"}
-                color={hasActiveSubscription ? colors.success : colors.accent}
-                background={hasActiveSubscription ? colors.successSurface : colors.iconSurface}
+                icon={nativeTunnelConnected ? "wifi" : hasActiveSubscription ? "check" : "calendar"}
+                color={nativeTunnelConnected || hasActiveSubscription ? colors.success : colors.accent}
+                background={nativeTunnelConnected || hasActiveSubscription ? colors.successSurface : colors.iconSurface}
                 size={18}
               />
               <View style={styles.homeStatusCopy}>
                 <Text style={[styles.rowTitle, { color: colors.foreground }]}>
-                  {hasActiveSubscription ? "Your subscription is active" : "No active subscription"}
+                  {nativeTunnelConnected
+                    ? "VPN tunnel connected"
+                    : hasActiveSubscription
+                      ? "Your subscription is active"
+                      : "No active subscription"}
                 </Text>
                 <Text style={[styles.smallCopy, { color: colors.mutedForeground }]} numberOfLines={1}>
-                  {hasActiveSubscription && subscription
-                    ? `${subscriptionPlan?.label ?? "Active plan"} · Expires ${formatDate(subscription.expiresAt)}`
-                    : "Choose a package to activate your subscription."}
+                  {nativeTunnelConnected
+                    ? `${subscriptionPlan?.label ?? "Active plan"} · VPN connection verified`
+                    : hasActiveSubscription && subscription
+                      ? `${subscriptionPlan?.label ?? "Active plan"} · VPN not connected · Expires ${formatDate(subscription.expiresAt)}`
+                      : "Choose a package to activate your subscription."}
                 </Text>
               </View>
               <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
@@ -1009,32 +1044,37 @@ export default function HomeScreen() {
 
             {homePopularPlans.length ? (
               <Animated.View entering={FadeInDown.duration(420).delay(330)} style={styles.homePopularGrid}>
-                {homePopularPlans.map((plan) => (
-                  <Pressable
+                {homePopularPlans.map((plan, index) => (
+                  <Animated.View
                     key={plan.code}
-                    onPress={() => startPaymentForPlan(plan.code)}
-                    style={({ pressed }) => [
-                      styles.homePopularCard,
-                      { backgroundColor: colors.card, borderColor: colors.border },
-                      pressed ? styles.pressed : null,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Buy ${plan.durationDays} days for KES ${formatAmount(plan.amountKes)}`}
-                    testID={`home-plan-${plan.code}`}
+                    entering={FadeInDown.duration(360).delay(360 + index * 75)}
+                    style={styles.homePopularAnimatedCard}
                   >
-                    <View style={[styles.homePopularIcon, { backgroundColor: colors.iconSurface }]}>
-                      <Feather name="calendar" size={18} color={colors.primary} />
-                    </View>
-                    <View style={styles.homePopularCopy}>
-                      <Text style={[styles.homePopularDays, { color: colors.foreground }]}>
-                        {plan.durationDays} {plan.durationDays === 1 ? "Day" : "Days"}
-                      </Text>
-                      <Text style={[styles.homePopularPrice, { color: colors.foreground }]}>
-                        KES {formatAmount(plan.amountKes)}
-                      </Text>
-                    </View>
-                    <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-                  </Pressable>
+                    <Pressable
+                      onPress={() => startPaymentForPlan(plan.code)}
+                      style={({ pressed }) => [
+                        styles.homePopularCard,
+                        { backgroundColor: colors.card, borderColor: colors.border },
+                        pressed ? styles.pressed : null,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Buy ${plan.durationDays} days for KES ${formatAmount(plan.amountKes)}`}
+                      testID={`home-plan-${plan.code}`}
+                    >
+                      <View style={[styles.homePopularIcon, { backgroundColor: colors.iconSurface }]}>
+                        <Feather name="calendar" size={18} color={colors.primary} />
+                      </View>
+                      <View style={styles.homePopularCopy}>
+                        <Text style={[styles.homePopularDays, { color: colors.foreground }]}>
+                          {plan.durationDays} {plan.durationDays === 1 ? "Day" : "Days"}
+                        </Text>
+                        <Text style={[styles.homePopularPrice, { color: colors.foreground }]}>
+                          KES {formatAmount(plan.amountKes)}
+                        </Text>
+                      </View>
+                      <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+                    </Pressable>
+                  </Animated.View>
                 ))}
               </Animated.View>
             ) : plansQuery.isLoading ? (
@@ -1897,6 +1937,9 @@ const styles = StyleSheet.create({
   homeStatusPillText: { fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
   homeOrbArea: { height: 190, alignItems: "center", justifyContent: "center", marginTop: 0, marginBottom: 0 },
   orbAura: { position: "absolute", height: 178, width: 178, borderRadius: 90 },
+  orbPulseRing: { position: "absolute", height: 182, width: 182, borderRadius: 92, borderWidth: 1 },
+  orbitTrackWide: { position: "absolute", top: 3, alignSelf: "center", width: 184, height: 184, borderRadius: 92, borderWidth: 1, borderStyle: "dashed", alignItems: "center", justifyContent: "flex-start" },
+  orbitDotWide: { width: 5, height: 5, borderRadius: 3, marginTop: -3 },
   orbitTrack: { position: "absolute", top: 18, alignSelf: "center", width: 154, height: 154, borderRadius: 80, borderWidth: 1, alignItems: "center", justifyContent: "flex-start" },
   orbitDot: { width: 8, height: 8, borderRadius: 4, marginTop: -4 },
   orbRingOuter: { width: 174, height: 174, borderRadius: 90, borderWidth: 2, alignItems: "center", justifyContent: "center", shadowOpacity: 0.4, shadowRadius: 24, elevation: 8 },
@@ -1922,6 +1965,7 @@ const styles = StyleSheet.create({
   homePromoArrow: { height: 32, width: 32, borderRadius: 16, backgroundColor: "#ffffff", alignItems: "center", justifyContent: "center" },
   homePlansHeading: { marginBottom: 9 },
   homePopularGrid: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  homePopularAnimatedCard: { flex: 1, minWidth: 0 },
   homePopularCard: { flex: 1, minWidth: 0, minHeight: 75, borderWidth: 1, borderRadius: 14, paddingHorizontal: 9, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 8 },
   homePopularIcon: { height: 38, width: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   homePopularCopy: { flex: 1, minWidth: 0 },

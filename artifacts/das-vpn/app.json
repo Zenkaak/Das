@@ -14,7 +14,8 @@
       "package": "com.dasvpn.client"
     },
     "web": {
-      "favicon": "./assets/images/icon.png"
+      "favicon": "./assets/images/icon.png",
+      "output": "static"
     },
     "plugins": [
       "expo-router",

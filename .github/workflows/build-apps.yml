@@ -1,0 +1,83 @@
+name: Build DAS VPN PWA and Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/das-vpn/**"
+      - "lib/api-client-react/**"
+      - "lib/api-spec/**"
+      - "lib/api-zod/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/build-apps.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Export PWA and build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      EXPO_PUBLIC_DOMAIN: dasvpn.vercel.app
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform tools
+        run: |
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null
+          set -o pipefail
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check shared libraries and mobile app
+        run: pnpm run typecheck:libs && pnpm --filter @workspace/das-vpn run typecheck
+
+      - name: Build installable PWA
+        run: pnpm --filter @workspace/das-vpn run build:web
+
+      - name: Build Android debug APK
+        run: pnpm --filter @workspace/das-vpn run build:apk
+
+      - name: Upload PWA build
+        uses: actions/upload-artifact@v4
+        with:
+          name: das-vpn-pwa
+          path: artifacts/das-vpn/dist/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: das-vpn-android-apk
+          path: artifacts/das-vpn/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
