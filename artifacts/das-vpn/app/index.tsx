@@ -78,6 +78,7 @@ function formatDate(value?: string | null): string {
   });
 }
 
+<<<<<<< HEAD
 function formatSubscriptionCountdown(expiresAt: string, now: number): string {
   const remainingMs = new Date(expiresAt).getTime() - now;
   if (!Number.isFinite(remainingMs)) return "Unavailable";
@@ -94,6 +95,8 @@ function formatSubscriptionCountdown(expiresAt: string, now: number): string {
   return days > 0 ? `${days}d ${clock}` : clock;
 }
 
+=======
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
 function formatActivityTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
@@ -283,7 +286,10 @@ export default function HomeScreen() {
   const [timedOut, setTimedOut] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
+<<<<<<< HEAD
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
+=======
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const checkoutOpening = useRef(false);
   const paymentSubmissionLock = useRef(false);
@@ -296,15 +302,22 @@ export default function HomeScreen() {
   const outerOrbit = useSharedValue(0);
   const signalWave = useSharedValue(0);
   const float = useSharedValue(0);
+<<<<<<< HEAD
   const subscriptionCardPulse = useSharedValue(0);
+=======
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
   useEffect(() => {
     aura.value = withRepeat(withTiming(1, { duration: 2200 }), -1, true);
     orbit.value = withRepeat(withTiming(1, { duration: 8400 }), -1, false);
     outerOrbit.value = withRepeat(withTiming(1, { duration: 11800 }), -1, false);
     signalWave.value = withRepeat(withTiming(1, { duration: 2600 }), -1, false);
     float.value = withRepeat(withTiming(1, { duration: 1800 }), -1, true);
+<<<<<<< HEAD
     subscriptionCardPulse.value = withRepeat(withTiming(1, { duration: 1900 }), -1, true);
   }, [aura, float, orbit, outerOrbit, signalWave, subscriptionCardPulse]);
+=======
+  }, [aura, float, orbit, outerOrbit, signalWave]);
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
   const auraStyle = useAnimatedStyle(() => ({
     opacity: 0.23 + aura.value * 0.28,
     transform: [{ scale: 0.94 + aura.value * 0.06 }],
@@ -322,6 +335,7 @@ export default function HomeScreen() {
   const orbFloatStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: float.value * -6 }],
   }));
+<<<<<<< HEAD
   const subscriptionCardPulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: 1 + subscriptionCardPulse.value * 0.012 }],
     shadowOpacity: 0.08 + subscriptionCardPulse.value * 0.14,
@@ -331,6 +345,8 @@ export default function HomeScreen() {
     opacity: 0.58 + subscriptionCardPulse.value * 0.42,
     transform: [{ scale: 0.88 + subscriptionCardPulse.value * 0.24 }],
   }));
+=======
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
 
   const startDeviceSession = useCallback(async () => {
     setSessionMessage("");
@@ -432,12 +448,15 @@ export default function HomeScreen() {
   const hasActiveSubscription = Boolean(
     subscription?.expiresAt && new Date(subscription.expiresAt).getTime() > Date.now(),
   );
+<<<<<<< HEAD
   useEffect(() => {
     if (!hasActiveSubscription || !subscription?.expiresAt) return;
     setCountdownNow(Date.now());
     const timer = setInterval(() => setCountdownNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [hasActiveSubscription, subscription?.expiresAt]);
+=======
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
   const subscriptionPlan = plans.find((plan) => plan.code === subscription?.planCode);
   const featuredPlan = plans.find((plan) => plan.durationDays === 3) ?? plans[0];
   const preferredPopularPlans = plans.filter(
@@ -983,6 +1002,7 @@ export default function HomeScreen() {
               </Animated.View>
             </Animated.View>
             <Animated.View entering={FadeInDown.duration(400).delay(170)}>
+<<<<<<< HEAD
               <Animated.View
                 style={[
                   styles.homeStatusCardMotion,
@@ -1067,6 +1087,46 @@ export default function HomeScreen() {
                   <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
                 </Pressable>
               </Animated.View>
+=======
+            <Pressable
+              onPress={() => setActiveTab(hasActiveSubscription ? "activity" : "plans")}
+              style={({ pressed }) => [
+                styles.homeStatusCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: hasActiveSubscription ? colors.successBorder : colors.border,
+                },
+                pressed ? styles.pressed : null,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={hasActiveSubscription ? "View active subscription details" : "Choose a subscription plan"}
+              testID="open-plans"
+            >
+              <IconTile
+                icon={nativeTunnelConnected ? "wifi" : hasActiveSubscription ? "check" : "calendar"}
+                color={nativeTunnelConnected || hasActiveSubscription ? colors.success : colors.accent}
+                background={nativeTunnelConnected || hasActiveSubscription ? colors.successSurface : colors.iconSurface}
+                size={18}
+              />
+              <View style={styles.homeStatusCopy}>
+                <Text style={[styles.rowTitle, { color: colors.foreground }]}>
+                  {nativeTunnelConnected
+                    ? "VPN tunnel connected"
+                    : hasActiveSubscription
+                      ? "Your subscription is active"
+                      : "No active subscription"}
+                </Text>
+                <Text style={[styles.smallCopy, { color: colors.mutedForeground }]} numberOfLines={1}>
+                  {nativeTunnelConnected
+                    ? `${subscriptionPlan?.label ?? "Active plan"} · VPN connection verified`
+                    : hasActiveSubscription && subscription
+                      ? `${subscriptionPlan?.label ?? "Active plan"} · VPN not connected · Expires ${formatDate(subscription.expiresAt)}`
+                      : "Choose a package to activate your subscription."}
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+            </Pressable>
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
             </Animated.View>
 
             {featuredPlan ? (
@@ -1390,7 +1450,11 @@ export default function HomeScreen() {
                 </View>
                 <View style={styles.flexOne}>
                   <Text style={[styles.rowTitle, { color: colors.foreground }]}>Secure payment powered by</Text>
+<<<<<<< HEAD
                   <Text style={[styles.rowTitle, styles.mpesaProvider, { color: colors.foreground }]}>DAS VPN</Text>
+=======
+                  <Text style={[styles.rowTitle, styles.mpesaProvider, { color: colors.foreground }]}>CustomerBuyGoodsOnline</Text>
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
                   <Text style={[styles.smallCopy, { color: colors.mutedForeground }]}>
                     You’ll receive an STK Push on your phone. Enter your M-Pesa PIN to complete the payment.
                   </Text>
@@ -1506,12 +1570,20 @@ export default function HomeScreen() {
                 </View>
                 <View style={styles.flexOne}>
                   <Text style={[styles.rowTitle, { color: colors.foreground }]}>
+<<<<<<< HEAD
                     {nativeTunnelConnected ? "Connected securely" : "Subscription active"}
+=======
+                    {nativeTunnelConnected ? "Connected securely" : "VPN not connected"}
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
                   </Text>
                   <Text style={[styles.smallCopy, { color: "#c2c6ef" }]}>
                     {nativeTunnelConnected
                       ? "Your secure connection is active."
+<<<<<<< HEAD
                       : "Your payment is verified and your subscription is active."}
+=======
+                      : "Your payment is verified. A live VPN server is not configured yet."}
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
                   </Text>
                 </View>
               </LinearGradient>
@@ -2030,6 +2102,7 @@ const styles = StyleSheet.create({
   centered: { textAlign: "center" },
   connectionTitle: { textAlign: "center", fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
   connectionSubcopy: { textAlign: "center", fontSize: 10, marginTop: 5, lineHeight: 15 },
+<<<<<<< HEAD
   homeStatusCardMotion: { width: "100%", marginBottom: 14, borderRadius: 15 },
   homeStatusCardActiveMotion: { shadowColor: "#14b879", shadowOffset: { width: 0, height: 2 }, elevation: 3 },
   homeStatusCard: { width: "100%", minHeight: 63, borderWidth: 1, borderRadius: 15, paddingHorizontal: 11, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 10 },
@@ -2039,6 +2112,10 @@ const styles = StyleSheet.create({
   subscriptionCountdownDot: { width: 5, height: 5, borderRadius: 3 },
   subscriptionCountdownLabel: { fontSize: 8, lineHeight: 12, fontWeight: "700", letterSpacing: 0.45 },
   subscriptionCountdownValue: { fontSize: 10, lineHeight: 12, fontWeight: "800", letterSpacing: 0.25, fontVariant: ["tabular-nums"] },
+=======
+  homeStatusCard: { width: "100%", minHeight: 63, borderWidth: 1, borderRadius: 15, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 14, flexDirection: "row", alignItems: "center", gap: 10 },
+  homeStatusCopy: { flex: 1, gap: 1 },
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
   homePlanButton: { minHeight: 28, paddingHorizontal: 12, borderRadius: 14, alignItems: "center", justifyContent: "center" },
   homePlanButtonText: { color: "#ffffff", fontSize: 9, fontWeight: "700" },
   homePromoCard: { borderRadius: 17, overflow: "hidden", marginBottom: 17, shadowOpacity: 0.2, shadowRadius: 16, elevation: 6 },

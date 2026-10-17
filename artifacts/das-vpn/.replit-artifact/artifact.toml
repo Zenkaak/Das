@@ -1,7 +1,11 @@
 kind = "mobile"
 previewPath = "/"
 title = "DAS VPN"
+<<<<<<< HEAD
 description = "A premium mobile VPN app for DAS customers to buy M-Pesa subscriptions, securely manage anonymous device sessions, and connect to verified WireGuard VPN servers without creating an account."
+=======
+description = "A secure VPN subscription app with M-Pesa checkout, private device sessions, and VPN connection status for DAS customers."
+>>>>>>> 6adb9a8 (Update api server logic and regenerate client SDKs)
 version = "1.0.0"
 id = "artifacts/das-vpn"
 router = "expo-domain"
