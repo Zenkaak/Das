@@ -71,9 +71,6 @@ jobs:
       - name: Build installable PWA
         run: pnpm --filter @workspace/das-vpn run build:web
 
-      - name: Build Android debug APK
-        run: pnpm --filter @workspace/das-vpn run build:apk
-
       - name: Upload PWA build
         uses: actions/upload-artifact@v4
         with:
@@ -81,6 +78,12 @@ jobs:
           path: artifacts/das-vpn/dist/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Build Android debug APK
+        run: |
+          pnpm --filter @workspace/das-vpn exec expo prebuild --platform android --no-install
+          cd artifacts/das-vpn/android
+          ./gradlew assembleDebug -PreactNativeArchitectures=arm64-v8a,armeabi-v7a --no-daemon --console=plain
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
