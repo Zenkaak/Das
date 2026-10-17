@@ -1023,16 +1023,16 @@ export default function HomeScreen() {
                   <View style={styles.homeStatusCopy}>
                     <Text style={[styles.rowTitle, { color: colors.foreground }]}>
                       {nativeTunnelConnected
-                        ? "VPN tunnel connected"
+                        ? "Connected securely"
                         : hasActiveSubscription
                           ? "Your subscription is active"
                           : "No active subscription"}
                     </Text>
                     <Text style={[styles.smallCopy, { color: colors.mutedForeground }]} numberOfLines={1}>
                       {nativeTunnelConnected
-                        ? `${subscriptionPlan?.label ?? "Active plan"} · VPN connection verified`
+                        ? `${subscriptionPlan?.label ?? "Active plan"} · Connection verified`
                         : hasActiveSubscription && subscription
-                          ? `${subscriptionPlan?.label ?? "Active plan"} · VPN not connected · Expires ${formatDate(subscription.expiresAt)}`
+                          ? `${subscriptionPlan?.label ?? "Active plan"} · Expires ${formatDate(subscription.expiresAt)}`
                           : "Choose a package to activate your subscription."}
                     </Text>
                     {hasActiveSubscription && subscription ? (
@@ -1390,7 +1390,7 @@ export default function HomeScreen() {
                 </View>
                 <View style={styles.flexOne}>
                   <Text style={[styles.rowTitle, { color: colors.foreground }]}>Secure payment powered by</Text>
-                  <Text style={[styles.rowTitle, styles.mpesaProvider, { color: colors.foreground }]}>CustomerBuyGoodsOnline</Text>
+                  <Text style={[styles.rowTitle, styles.mpesaProvider, { color: colors.foreground }]}>DAS VPN</Text>
                   <Text style={[styles.smallCopy, { color: colors.mutedForeground }]}>
                     You’ll receive an STK Push on your phone. Enter your M-Pesa PIN to complete the payment.
                   </Text>
@@ -1506,12 +1506,12 @@ export default function HomeScreen() {
                 </View>
                 <View style={styles.flexOne}>
                   <Text style={[styles.rowTitle, { color: colors.foreground }]}>
-                    {nativeTunnelConnected ? "Connected securely" : "VPN not connected"}
+                    {nativeTunnelConnected ? "Connected securely" : "Subscription active"}
                   </Text>
                   <Text style={[styles.smallCopy, { color: "#c2c6ef" }]}>
                     {nativeTunnelConnected
                       ? "Your secure connection is active."
-                      : "Your payment is verified. A live VPN server is not configured yet."}
+                      : "Your payment is verified and your subscription is active."}
                   </Text>
                 </View>
               </LinearGradient>
